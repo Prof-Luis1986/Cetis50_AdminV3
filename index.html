@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Panel Administrativo - CETIS 50</title>
+  <link rel="stylesheet" href="admin.css" />
+  <style>
+    /* ==================== ESTILOS ADMIN ==================== */
+    :root {
+      --vino-700: #7a1e29;
+      --vino-800: #5d1620;
+      --blanco: #ffffff;
+      --gris-claro: #f5f5f5;
+      --gris-medio: #e0e0e0;
+      --gris-oscuro: #555;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+      color: #333;
+    }
+
+    .admin-header {
+      background: linear-gradient(135deg, var(--vino-700) 0%, var(--vino-800) 100%);
+      color: var(--blanco);
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .admin-header img {
+      max-width: 80px;
+      margin-bottom: 10px;
+    }
+
+    .admin-header h1 {
+      margin: 0;
+      font-size: 1.8rem;
+      font-weight: 700;
+    }
+
+    .admin-container {
+      max-width: 1200px;
+      margin: 30px auto;
+      padding: 0 20px;
+    }
+
+    /* Login Section */
+    .login-box {
+      background: white;
+      border-radius: 12px;
+      padding: 40px;
+      text-align: center;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+      max-width: 500px;
+      margin: 50px auto;
+    }
+
+    .login-box h2 {
+      color: var(--vino-700);
+      margin-bottom: 20px;
+    }
+
+    .login-box p {
+      color: #666;
+      margin-bottom: 25px;
+    }
+
+    /* User Info Bar */
+    .user-bar {
+      background: white;
+      border-radius: 12px;
+      padding: 15px 25px;
+      margin-bottom: 25px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+
+    .user-bar .user-info {
+      flex: 1;
+    }
+
+    .user-bar .user-info strong {
+      color: var(--vino-700);
+      font-size: 1.1rem;
+    }
+
+    .user-bar .user-info span {
+      color: #666;
+      font-size: 0.9rem;
+    }
+
+    /* Tabs */
+    .tabs-container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .tabs-nav {
+      display: flex;
+      background: var(--gris-claro);
+      border-bottom: 3px solid var(--vino-700);
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      flex: 1;
+      min-width: 150px;
+      padding: 18px 20px;
+      background: transparent;
+      border: none;
+      color: var(--gris-oscuro);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      border-bottom: 3px solid transparent;
+      white-space: nowrap;
+    }
+
+    .tab-btn:hover {
+      background: rgba(122, 30, 41, 0.05);
+      color: var(--vino-700);
+    }
+
+    .tab-btn.active {
+      background: white;
+      color: var(--vino-700);
+      border-bottom-color: var(--vino-700);
+    }
+
+    .tab-content {
+      display: none;
+      padding: 30px;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Forms */
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--vino-700);
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      width: 100%;
+      padding: 12px 15px;
+      border: 2px solid var(--gris-medio);
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: border-color 0.3s ease;
+      box-sizing: border-box;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--vino-700);
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    .form-group .hint {
+      font-size: 0.85rem;
+      color: #777;
+      margin-top: 5px;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+
+    .form-row .form-group {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+    }
+
+    /* Buttons */
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-block;
+    }
+
+    .btn-primary {
+      background: var(--vino-700);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: var(--vino-800);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(122, 30, 41, 0.3);
+    }
+
+    .btn-secondary {
+      background: var(--gris-medio);
+      color: var(--gris-oscuro);
+    }
+
+    .btn-secondary:hover {
+      background: #d0d0d0;
+    }
+
+    .btn-danger {
+      background: #c62828;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #b71c1c;
+    }
+
+    .btn-sm {
+      padding: 8px 16px;
+      font-size: 0.9rem;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+
+    /* Messages */
+    .message {
+      padding: 15px 20px;
+      border-radius: 8px;
+      margin-top: 20px;
+      font-weight: 500;
+    }
+
+    .message.success {
+      background: #e8f5e9;
+      color: #2e7d32;
+      border-left: 4px solid #4caf50;
+    }
+
+    .message.error {
+      background: #ffebee;
+      color: #c62828;
+      border-left: 4px solid #f44336;
+    }
+
+    .message.info {
+      background: #e3f2fd;
+      color: #1565c0;
+      border-left: 4px solid #2196f3;
+    }
+
+    /* Cards for announcements/users */
+    .card-list {
+      display: grid;
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    .card-item {
+      background: var(--gris-claro);
+      border-left: 4px solid var(--vino-700);
+      padding: 20px;
+      border-radius: 8px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card-item:hover {
+      transform: translateX(5px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    .card-item h3 {
+      margin: 0 0 10px 0;
+      color: var(--vino-700);
+      font-size: 1.2rem;
+    }
+
+    .card-item p {
+      margin: 5px 0;
+      color: #555;
+      line-height: 1.5;
+    }
+
+    .card-item .meta {
+      font-size: 0.85rem;
+      color: #777;
+      margin-top: 10px;
+    }
+
+    .card-item .actions {
+      margin-top: 15px;
+      display: flex;
+      gap: 10px;
+    }
+
+    /* File upload */
+    .file-upload {
+      border: 2px dashed var(--gris-medio);
+      border-radius: 8px;
+      padding: 30px;
+      text-align: center;
+      background: var(--gris-claro);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .file-upload:hover {
+      border-color: var(--vino-700);
+      background: white;
+    }
+
+    .file-upload input[type="file"] {
+      display: none;
+    }
+
+    .file-upload label {
+      cursor: pointer;
+      color: var(--vino-700);
+      font-weight: 600;
+    }
+
+    /* Table */
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background: white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    }
+
+    .data-table th {
+      background: var(--vino-700);
+      color: white;
+      padding: 15px;
+      text-align: left;
+      font-weight: 600;
+    }
+
+    .data-table td {
+      padding: 12px 15px;
+      border-bottom: 1px solid var(--gris-medio);
+    }
+
+    .data-table tr:hover {
+      background: var(--gris-claro);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .badge.success {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .badge.warning {
+      background: #fff3e0;
+      color: #ef6c00;
+    }
+
+    .badge.info {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .tabs-nav {
+        flex-direction: column;
+      }
+
+      .tab-btn {
+        border-bottom: none;
+        border-left: 3px solid transparent;
+      }
+
+      .tab-btn.active {
+        border-left-color: var(--vino-700);
+        border-bottom-color: transparent;
+      }
+
+      .user-bar {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .form-row {
+        flex-direction: column;
+      }
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="admin-header">
+  <img src="https://raw.githubusercontent.com/Prof-Luis1986/recursos-cetis50/refs/heads/main/logo-cetis50.jpg" alt="CETIS 50" />
+  <h1>Panel Administrativo - CETIS 50</h1>
+</header>
+
+<div class="admin-container">
+  
+  <!-- Login Section -->
+  <section id="login-section" class="login-box">
+    <h2>🔐 Acceso Administrativo</h2>
+    <p>Inicia sesión con tu cuenta institucional <strong>@cetis50cdmx.com</strong> para acceder al panel.</p>
+    <button id="login-btn" class="btn btn-primary">Iniciar sesión con Google</button>
+    <p id="login-msg" class="message" style="display:none;"></p>
+  </section>
+
+  <!-- Admin Panel (hidden until login) -->
+  <div id="admin-panel" class="hidden">
+    
+    <!-- User Info Bar -->
+    <div class="user-bar">
+      <div class="user-info">
+        <div><strong id="user-name">Usuario</strong></div>
+        <div><span id="user-email">email@cetis50cdmx.com</span></div>
+      </div>
+      <div>
+        <button id="logout-btn" class="btn btn-secondary">Cerrar sesión</button>
+      </div>
+    </div>
+
+    <!-- Tabs Container -->
+    <div class="tabs-container">
+      
+      <!-- Tabs Navigation -->
+      <nav class="tabs-nav">
+        <button class="tab-btn active" data-tab="avisos-generales">📢 Avisos Generales</button>
+        <button class="tab-btn" data-tab="avisos-docentes">👨‍🏫 Avisos Docentes</button>
+        <button class="tab-btn" data-tab="usuarios">👥 Gestión Usuarios</button>
+        <button class="tab-btn" data-tab="boletas">📊 Importar Boletas</button>
+      </nav>
+
+      <!-- Tab 1: Avisos Generales -->
+      <div id="tab-avisos-generales" class="tab-content active">
+        <h2 style="color: var(--vino-700); margin-top:0;">Publicar Aviso General</h2>
+        
+        <form id="form-aviso-general">
+          <div class="form-group">
+            <label for="ag-titulo">Título *</label>
+            <input type="text" id="ag-titulo" required />
+          </div>
+
+          <div class="form-group">
+            <label for="ag-contenido">Contenido *</label>
+            <textarea id="ag-contenido" required></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="ag-categoria">Categoría *</label>
+            <select id="ag-categoria" required>
+              <option value="">Selecciona...</option>
+              <option value="alumnos">Alumnos</option>
+              <option value="eventos">Eventos educativos</option>
+              <option value="vinculacion">Vinculación</option>
+              <option value="general">General</option>
+            </select>
+            <div class="hint">
+              Esta categoría determina en qué página se mostrará el aviso.
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="ag-especialidades">Especialidades (separadas por coma)</label>
+              <input type="text" id="ag-especialidades" placeholder="Programación, Soporte, RH" />
+              <div class="hint">Deja vacío para mostrar a todas las especialidades</div>
+            </div>
+
+            <div class="form-group">
+              <label for="ag-expiracion">Fecha de expiración</label>
+              <input type="date" id="ag-expiracion" />
+              <div class="hint">Opcional: el aviso se ocultará después de esta fecha</div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="ag-event-date">Fecha del evento (opcional, solo para categoría "eventos")</label>
+            <input type="datetime-local" id="ag-event-date" />
+            <div class="hint">Se mostrará como una etiqueta de fecha en la página de eventos</div>
+          </div>
+
+          <div class="form-group">
+            <label for="ag-enlace">Enlace (opcional)</label>
+            <input type="url" id="ag-enlace" placeholder="https://..." />
+            <div class="hint">URL para más información o inscripción</div>
+          </div>
+
+          <div class="btn-group">
+            <button type="submit" class="btn btn-primary">Publicar Aviso</button>
+            <button type="reset" class="btn btn-secondary">Limpiar formulario</button>
+          </div>
+        </form>
+
+        <div id="msg-aviso-general"></div>
+
+        <hr style="margin: 40px 0; border: none; border-top: 2px solid var(--gris-medio);" />
+
+        <h3 style="color: var(--vino-700);">Avisos Publicados</h3>
+        <div id="lista-avisos-generales" class="card-list">
+          <p style="color:#777;">Cargando avisos...</p>
+        </div>
+      </div>
+
+      <!-- Tab 2: Avisos Docentes -->
+      <div id="tab-avisos-docentes" class="tab-content">
+        <h2 style="color: var(--vino-700); margin-top:0;">Publicar Aviso para Docentes</h2>
+        
+        <form id="form-aviso-docente">
+          <div class="form-group">
+            <label for="ad-titulo">Título *</label>
+            <input type="text" id="ad-titulo" required />
+          </div>
+
+          <div class="form-group">
+            <label for="ad-contenido">Contenido *</label>
+            <textarea id="ad-contenido" required></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="ad-turno">Turno *</label>
+            <select id="ad-turno" required>
+              <option value="">Selecciona...</option>
+              <option value="matutino">🌅 Matutino</option>
+              <option value="vespertino">🌙 Vespertino</option>
+              <option value="ambos">🔄 Ambos turnos</option>
+            </select>
+          </div>
+
+          <!-- 🔹 NUEVO: campo de URL opcional para avisos docentes -->
+          <div class="form-group">
+            <label for="ad-enlace">Enlace (opcional)</label>
+            <input type="url" id="ad-enlace" placeholder="https://..." />
+            <div class="hint">URL para más información, materiales, formulario, etc.</div>
+          </div>
+          <!-- 🔹 FIN NUEVO -->
+
+          <div class="btn-group">
+            <button type="submit" class="btn btn-primary">Publicar Aviso Docente</button>
+            <button type="reset" class="btn btn-secondary">Limpiar formulario</button>
+          </div>
+        </form>
+
+        <div id="msg-aviso-docente"></div>
+
+        <hr style="margin: 40px 0; border: none; border-top: 2px solid var(--gris-medio);" />
+
+        <h3 style="color: var(--vino-700);">Avisos para Docentes Publicados</h3>
+        <div id="lista-avisos-docentes" class="card-list">
+          <p style="color:#777;">Cargando avisos...</p>
+        </div>
+      </div>
+
+      <!-- Tab 3: Gestión de Usuarios -->
+      <div id="tab-usuarios" class="tab-content">
+        <h2 style="color: var(--vino-700); margin-top:0;">Gestión de Usuarios</h2>
+
+        <!-- Registro Individual -->
+        <div style="background: white; padding: 25px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+          <h3 style="color: var(--vino-700); margin-top:0;">➕ Registrar Usuario Individual</h3>
+          
+          <form id="form-usuario-individual">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="ui-email">Correo institucional *</label>
+                <input type="email" id="ui-email" placeholder="usuario@cetis50cdmx.com" required />
+              </div>
+
+              <div class="form-group">
+                <label for="ui-nombre">Nombre completo *</label>
+                <input type="text" id="ui-nombre" required />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="ui-turno">Turno</label>
+                <select id="ui-turno">
+                  <option value="">Sin turno asignado</option>
+                  <option value="matutino">Matutino</option>
+                  <option value="vespertino">Vespertino</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label style="font-weight: 600; color: var(--vino-700);">Permisos:</label>
+              <div class="checkbox-group">
+                <input type="checkbox" id="ui-esDocente" />
+                <label for="ui-esDocente" style="font-weight: normal; margin:0;">Es Docente (acceso a sección docentes)</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="ui-canPublish" />
+                <label for="ui-canPublish" style="font-weight: normal; margin:0;">Puede publicar avisos generales</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="ui-canPublishDocentes" />
+                <label for="ui-canPublishDocentes" style="font-weight: normal; margin:0;">Puede publicar avisos para docentes</label>
+              </div>
+            </div>
+
+            <div class="btn-group">
+              <button type="submit" class="btn btn-primary">Registrar Usuario</button>
+              <button type="reset" class="btn btn-secondary">Limpiar</button>
+            </div>
+          </form>
+
+          <div id="msg-usuario-individual"></div>
+        </div>
+
+        <!-- Carga Masiva CSV -->
+        <div style="background: white; padding: 25px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+          <h3 style="color: var(--vino-700); margin-top:0;">📁 Carga Masiva por CSV</h3>
+          
+          <p style="color:#666; margin-bottom:15px;">
+            Sube un archivo CSV con las columnas: <code>email, nombre, esDocente, turno, canPublish, canPublishDocentes</code>
+          </p>
+
+          <div class="file-upload" id="csv-upload-area">
+            <input type="file" id="csv-file-input" accept=".csv" />
+            <label for="csv-file-input">
+              📤 Haz clic para seleccionar archivo CSV
+            </label>
+            <p id="csv-file-name" style="margin-top:10px; color:#777;"></p>
+          </div>
+
+          <div class="btn-group">
+            <button id="csv-preview-btn" class="btn btn-secondary" disabled>👁️ Previsualizar</button>
+            <button id="csv-upload-btn" class="btn btn-primary" disabled>⬆️ Cargar Usuarios</button>
+          </div>
+
+          <div id="msg-csv"></div>
+          <div id="csv-preview-table"></div>
+        </div>
+
+        <!-- Lista de Usuarios -->
+        <div style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+          <h3 style="color: var(--vino-700); margin-top:0;">📋 Usuarios Registrados</h3>
+          <button id="refresh-usuarios-btn" class="btn btn-secondary" style="margin-bottom:15px;">🔄 Actualizar lista</button>
+          <div id="lista-usuarios">
+            <p style="color:#777;">Cargando usuarios...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 4: Importar Boletas -->
+      <div id="tab-boletas" class="tab-content">
+        <h2 style="color: var(--vino-700); margin-top:0;">Importar Boletas desde CSV</h2>
+        
+        <p style="color:#666; margin-bottom:20px;">
+          Sube un archivo CSV con los datos de las boletas de los alumnos.
+        </p>
+
+        <div class="file-upload" id="boletas-upload-area">
+          <input type="file" id="boletas-file-input" accept=".csv" />
+          <label for="boletas-file-input">
+            📤 Haz clic para seleccionar archivo CSV de boletas
+          </label>
+          <p id="boletas-file-name" style="margin-top:10px; color:#777;"></p>
+        </div>
+
+        <div class="btn-group">
+          <button id="boletas-preview-btn" class="btn btn-secondary" disabled>👁️ Previsualizar</button>
+          <button id="boletas-upload-btn" class="btn btn-primary" disabled>⬆️ Importar Boletas</button>
+        </div>
+
+        <div id="msg-boletas"></div>
+        <div id="boletas-preview-table"></div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="firebase-config.js"></script>
+<script src="admin.js"></script>
+
+</body>
+</html>
