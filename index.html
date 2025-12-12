@@ -419,6 +419,72 @@
       color: #1565c0;
     }
 
+    /* Estilos para visualización de horarios */
+    .horario-card {
+      background: white;
+      border-left: 4px solid var(--vino-700);
+      padding: 20px;
+      margin: 15px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .horario-card h4 {
+      color: var(--vino-700);
+      margin: 0 0 15px 0;
+    }
+
+    .horario-info {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+
+    .horario-info-item {
+      padding: 10px;
+      background: var(--gris-claro);
+      border-radius: 6px;
+    }
+
+    .horario-info-item strong {
+      display: block;
+      color: var(--vino-700);
+      font-size: 0.85rem;
+      margin-bottom: 5px;
+    }
+
+    .carga-academica {
+      margin-top: 20px;
+    }
+
+    .carga-item {
+      background: var(--gris-claro);
+      padding: 15px;
+      margin: 10px 0;
+      border-radius: 6px;
+      border-left: 3px solid var(--vino-800);
+    }
+
+    .carga-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .carga-item-header h5 {
+      margin: 0;
+      color: var(--vino-800);
+    }
+
+    .carga-item-details {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      font-size: 0.9rem;
+    }
+
     /* Responsive */
     @media (max-width: 768px) {
       .tabs-nav {
@@ -442,6 +508,14 @@
 
       .form-row {
         flex-direction: column;
+      }
+
+      .horario-info {
+        grid-template-columns: 1fr;
+      }
+
+      .carga-item-details {
+        grid-template-columns: 1fr;
       }
     }
 
@@ -589,13 +663,11 @@
             </select>
           </div>
 
-          <!-- 🔹 NUEVO: campo de URL opcional para avisos docentes -->
           <div class="form-group">
             <label for="ad-enlace">Enlace (opcional)</label>
             <input type="url" id="ad-enlace" placeholder="https://..." />
             <div class="hint">URL para más información, materiales, formulario, etc.</div>
           </div>
-          <!-- 🔹 FIN NUEVO -->
 
           <div class="btn-group">
             <button type="submit" class="btn btn-primary">Publicar Aviso Docente</button>
@@ -611,6 +683,46 @@
         <div id="lista-avisos-docentes" class="card-list">
           <p style="color:#777;">Cargando avisos...</p>
         </div>
+
+        <hr style="margin: 40px 0; border: none; border-top: 2px solid var(--gris-medio);" />
+
+        <section id="horarios-docentes" style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+          <h2 style="color: var(--vino-700); margin-top:0;">🗓️ Gestión de Horarios de Docentes</h2>
+          <p style="color:#666;">
+            Sube un CSV que contenga los datos del docente y cada una de sus materias. El CSV puede tener encabezados como
+            <code>nombre, rfc, curp, categoria, turno, perfil, correo, plantel, ciclo_escolar</code> para datos del docente, y
+            <code>asignatura, grupo, salon, especialidad, dia, hora_inicio, hora_fin, horas, aula_tipo</code> para la carga académica.
+          </p>
+
+          <div class="file-upload" id="horarios-upload-area">
+            <input type="file" id="horarios-file-input" accept=".csv" />
+            <label for="horarios-file-input">
+              📤 Haz clic para seleccionar archivo CSV de horarios
+            </label>
+            <p id="horarios-file-name" style="margin-top:10px; color:#777;"></p>
+          </div>
+
+          <div class="btn-group">
+            <button id="horarios-preview-btn" class="btn btn-secondary" disabled>👁️ Previsualizar</button>
+            <button id="horarios-upload-btn" class="btn btn-primary" disabled>⬆️ Importar Horarios</button>
+          </div>
+
+          <div id="msg-horarios"></div>
+          <div id="horarios-preview-table"></div>
+
+          <div style="margin-top: 40px; background: var(--gris-claro); padding: 20px; border-radius: 12px;">
+            <h3 style="color: var(--vino-700); margin-top:0;">🔎 Buscar horario por RFC</h3>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="horario-search-rfc">RFC del docente</label>
+                <input type="text" id="horario-search-rfc" placeholder="MAAL860417LA" style="text-transform: uppercase;" />
+                <div class="hint">La búsqueda se realiza dentro de la colección <code>horarios_docentes</code>.</div>
+              </div>
+            </div>
+            <button id="horario-search-btn" class="btn btn-primary">Buscar horario</button>
+            <div id="horario-search-result" style="margin-top:20px;"></div>
+          </div>
+        </section>
       </div>
 
       <!-- Tab 3: Gestión de Usuarios -->

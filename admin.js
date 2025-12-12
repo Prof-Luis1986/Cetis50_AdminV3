@@ -8,6 +8,7 @@ const DOMINIO = 'cetis50cdmx.com';
 let currentUser = null;
 let csvData = null;
 let boletasData = null;
+let horariosData = null;
 
 // ==================== ELEMENTOS DOM ====================
 
@@ -53,6 +54,17 @@ const boletasPreviewBtn = document.getElementById('boletas-preview-btn');
 const boletasUploadBtn = document.getElementById('boletas-upload-btn');
 const msgBoletas = document.getElementById('msg-boletas');
 const boletasPreviewTable = document.getElementById('boletas-preview-table');
+
+// Horarios Docentes
+const horariosFileInput = document.getElementById('horarios-file-input');
+const horariosFileName = document.getElementById('horarios-file-name');
+const horariosPreviewBtn = document.getElementById('horarios-preview-btn');
+const horariosUploadBtn = document.getElementById('horarios-upload-btn');
+const msgHorarios = document.getElementById('msg-horarios');
+const horariosPreviewTable = document.getElementById('horarios-preview-table');
+const horarioSearchInput = document.getElementById('horario-search-rfc');
+const horarioSearchBtn = document.getElementById('horario-search-btn');
+const horarioSearchResult = document.getElementById('horario-search-result');
 
 // ==================== AUTH ====================
 
@@ -568,7 +580,7 @@ formAvisoDocente.addEventListener('submit', async (e) => {
   const titulo    = document.getElementById('ad-titulo').value.trim();
   const contenido = document.getElementById('ad-contenido').value.trim();
   const turno     = document.getElementById('ad-turno').value;
-  const linkUrl   = (document.getElementById('ad-enlace')?.value || '').trim();  // 🔹 NUEVO
+  const linkUrl   = (document.getElementById('ad-enlace')?.value || '').trim();
 
   if (!titulo || !contenido || !turno) {
     showMessage(msgAvisoDocente, 'Título, contenido y turno son obligatorios.', 'error');
@@ -996,11 +1008,397 @@ function mostrarPreviewBoletas(data) {
   boletasPreviewTable.innerHTML = html;
 }
 
-// ==================== UTILIDADES ====================
+// ==================== HORARIOS DOCENTES ====================
+
+if (horariosFileInput) {
+  horariosFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      horariosFileName.textContent = `📄 ${file.name}`;
+      horariosPreviewBtn.disabled = false;
+      horariosUploadBtn.disabled = false;
+      horariosData = null;
+      horariosPreviewTable.innerHTML = '';
+    } else {
+      horariosFileName.textContent = '';
+      horariosPreviewBtn.disabled = true;
+      horariosUploadBtn.disabled = true;
+      horariosPreviewTable.innerHTML = '';
+    }
+  });
+}
+
+if (horariosPreviewBtn) {
+  horariosPreviewBtn.addEventListener('click', () => {
+    const file = horariosFileInput?.files?.[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        console.log('Encabezados detectados:', Object.keys(results.data[0] || {}));
+        horariosData = results.data.map(normalizarFilaHorario);
+        mostrarPreviewHorarios(horariosData.slice(0, 5));
+        showMessage(
+          msgHorarios,
+          `✅ ${horariosData.length} filas detectadas. Mostrando primeras 5.`,
+          'info'
+        );
+      },
+      error: (error) => {
+        showMessage(msgHorarios, '❌ Error al leer CSV: ' + error.message, 'error');
+      }
+    });
+  });
+}
+
+if (horariosUploadBtn) {
+  horariosUploadBtn.addEventListener('click', async () => {
+    if (!horariosData || horariosData.length === 0) {
+      showMessage(msgHorarios, '❌ Primero previsualiza el CSV.', 'error');
+      return;
+    }
+
+    if (!confirm(`¿Importar horarios para ${horariosData.length} filas?`)) return;
+
+    showMessage(msgHorarios, '⏳ Importando horarios...', 'info');
+
+    const agrupados = {};
+    let filasErroneas = 0;
+
+    horariosData.forEach((row) => {
+      // Aceptar tanto docente_rfc como rfc
+      const rfc = (row.rfc || row.docente_rfc || '').trim().toUpperCase();
+      if (!rfc) {
+        filasErroneas++;
+        console.warn('Fila sin RFC:', row);
+        return;
+      }
+
+      // Obtener ciclo escolar (puede venir como ciclo_escolar o docente_ciclo_escolar)
+      const cicloEscolar = row.ciclo_escolar || row.docente_ciclo_escolar || '2024-2025';
+      
+      // Crear clave única: RFC_CICLO
+      const docId = `${rfc}_${cicloEscolar}`;
+
+      if (!agrupados[docId]) {
+        agrupados[docId] = {
+          metadata: construirMetadata(row, cicloEscolar),
+          docente: construirDocenteDesdeFila(row),
+          carga_academica: []
+        };
+      } else {
+        // Combinar datos del docente si hay múltiples filas
+        combinarDocenteData(agrupados[docId].docente, construirDocenteDesdeFila(row));
+      }
+
+      // Agregar materia a la carga académica
+      const materia = construirCargaAcademica(row);
+      if (materia.asignatura) { // Solo agregar si tiene asignatura
+        agrupados[docId].carga_academica.push(materia);
+      }
+    });
+
+    let exitosos = 0;
+    let errores = filasErroneas;
+
+    for (const [docId, horario] of Object.entries(agrupados)) {
+      try {
+        await db.collection('horarios_docentes').doc(docId).set({
+          metadata: horario.metadata,
+          docente: horario.docente,
+          carga_academica: horario.carga_academica,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          importedBy: currentUser?.uid || null
+        });
+        exitosos++;
+      } catch (e) {
+        console.error('Error guardando horario', docId, e);
+        errores++;
+      }
+    }
+
+    const tipoMensaje = errores === 0 ? 'success' : 'info';
+    showMessage(
+      msgHorarios,
+      `✅ Importación completa: ${exitosos} horarios guardados, ${errores} errores.`,
+      tipoMensaje
+    );
+
+    horariosFileInput.value = '';
+    horariosFileName.textContent = '';
+    horariosPreviewBtn.disabled = true;
+    horariosUploadBtn.disabled = true;
+    horariosPreviewTable.innerHTML = '';
+    horariosData = null;
+  });
+}
+
+if (horarioSearchBtn) {
+  horarioSearchBtn.addEventListener('click', buscarHorarioPorRfc);
+}
+
+if (horarioSearchInput) {
+  horarioSearchInput.addEventListener('keyup', (e) => {
+    if (e.key === 'Enter') {
+      buscarHorarioPorRfc();
+    }
+  });
+}
+
+async function buscarHorarioPorRfc() {
+  if (!horarioSearchInput || !horarioSearchResult) return;
+  const rfc = horarioSearchInput.value.trim().toUpperCase();
+  if (!rfc) {
+    horarioSearchResult.innerHTML = '<p style="color:#c62828;">Ingresa un RFC.</p>';
+    return;
+  }
+
+  horarioSearchResult.innerHTML = '<p>🔍 Buscando...</p>';
+  try {
+    // Buscar todos los documentos que empiecen con el RFC
+    const snapshot = await db.collection('horarios_docentes')
+      .where(firebase.firestore.FieldPath.documentId(), '>=', rfc)
+      .where(firebase.firestore.FieldPath.documentId(), '<=', rfc + '\uf8ff')
+      .get();
+
+    if (snapshot.empty) {
+      horarioSearchResult.innerHTML = '<p style="color:#777;">No se encontró horario para este RFC.</p>';
+      return;
+    }
+
+    let html = '';
+    snapshot.forEach(doc => {
+      html += renderHorarioResult(doc.data(), doc.id);
+    });
+    
+    horarioSearchResult.innerHTML = html;
+  } catch (e) {
+    console.error(e);
+    horarioSearchResult.innerHTML = '<p style="color:#c62828;">Error al buscar horario: ' + e.message + '</p>';
+  }
+}
+
+// ==================== FUNCIONES AUXILIARES ====================
 
 function showMessage(element, msg, type = 'info') {
   element.innerHTML = `<div class="message ${type}">${msg}</div>`;
   setTimeout(() => {
     element.innerHTML = '';
   }, 5000);
+}
+
+function normalizarFilaHorario(row) {
+  const normalizada = {};
+  Object.keys(row).forEach((key) => {
+    if (!key) return;
+    const cleanKey = key.trim();
+    const valor = row[key];
+    normalizada[cleanKey] = typeof valor === 'string' ? valor.trim() : valor;
+  });
+  return normalizada;
+}
+
+function obtenerPeriodo(cicloEscolar) {
+  // Convertir "2024-2025" a "Agosto 2024 - Julio 2025"
+  const [inicio, fin] = cicloEscolar.split('-');
+  return `Agosto ${inicio} - Julio ${fin}`;
+}
+
+// ✅ NUEVA FUNCIÓN: Obtener autoridades por turno
+function obtenerAutoridades(turno) {
+  const director = 'EDGAR OAXACA HERNÁNDEZ';
+  const subdirector_tecnico = 'IGNACIO MORALES CASTRO';
+
+  let jefe_servicios_docentes;
+  const turnoNorm = (turno || '').toLowerCase();
+
+  if (turnoNorm.includes('matutino')) {
+    jefe_servicios_docentes = 'VÍCTOR MANUEL POOT LÓPEZ';
+  } else if (turnoNorm.includes('vespertino')) {
+    jefe_servicios_docentes = 'MARTÍN RAFAEL VELASCO BALTAZAR';
+  } else {
+    // Por defecto, vespertino
+    jefe_servicios_docentes = 'MARTÍN RAFAEL VELASCO BALTAZAR';
+  }
+
+  return {
+    director,
+    subdirector_tecnico,
+    jefe_servicios_docentes
+  };
+}
+
+// ✅ MODIFICADA: Ahora incluye autoridades
+function construirMetadata(row, cicloEscolar) {
+  const ahora = new Date();
+  const turno = row.turno || row.docente_turno || '';
+
+  const metadataBase = {
+    ciclo_escolar: cicloEscolar,
+    periodo: obtenerPeriodo(cicloEscolar),
+    fecha_registro: ahora.toISOString().split('T')[0],
+    origen_documento: row.origen_documento || 'DGETI - DISTRIBUCIÓN DE ACTIVIDADES ACADÉMICAS',
+    plantel: (row.plantel || 'CETIS 50').toUpperCase(),
+    ubicacion: (row.ubicacion || 'IZTAPALAPA, CDMX').toUpperCase()
+  };
+
+  const autoridades = obtenerAutoridades(turno);
+
+  return {
+    ...metadataBase,
+    autoridades
+  };
+}
+
+function construirDocenteDesdeFila(row) {
+  return {
+    nombre: (row.nombre || row.docente_nombre || row.docente || '').toUpperCase(),
+    rfc: (row.rfc || row.docente_rfc || '').toUpperCase(),
+    curp: (row.curp || row.docente_curp || '').toUpperCase(),
+    categoria: row.categoria || row.docente_categoria || '',
+    turno: row.turno || row.docente_turno || '',
+    perfil: row.perfil || row.docente_perfil || '',
+    correo: row.correo || row.docente_correo || ''
+  };
+}
+
+function combinarDocenteData(destino, fuente) {
+  Object.keys(fuente).forEach((clave) => {
+    if (!destino[clave] && fuente[clave]) {
+      destino[clave] = fuente[clave];
+    }
+  });
+}
+
+function construirCargaAcademica(row) {
+  return {
+    asignatura: row.asignatura || '',
+    grupo: row.grupo || '',
+    salon: row.salon || '',
+    especialidad: row.especialidad || '',
+    dia: row.dia || '',
+    hora_inicio: row.hora_inicio || '',
+    hora_fin: row.hora_fin || '',
+    horas: Number(row.horas) || 0,
+    aula_tipo: row.aula_tipo || ''
+  };
+}
+
+function mostrarPreviewHorarios(data) {
+  if (!data || data.length === 0) {
+    horariosPreviewTable.innerHTML = '<p>No hay datos para mostrar.</p>';
+    return;
+  }
+
+  let html = '<table class="data-table"><thead><tr>';
+  const keys = Object.keys(data[0]);
+  keys.forEach((key) => {
+    html += `<th>${key}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  data.forEach((row) => {
+    html += '<tr>';
+    keys.forEach((key) => {
+      html += `<td>${row[key] ?? ''}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  horariosPreviewTable.innerHTML = html;
+}
+
+// ✅ MODIFICADA: Ahora muestra autoridades
+function renderHorarioResult(data, docId) {
+  const metadata = data?.metadata || {};
+  const docente = data?.docente || {};
+  const carga = Array.isArray(data?.carga_academica) ? data.carga_academica : [];
+  const autoridades = metadata.autoridades || {};
+
+  let html = '<div class="horario-card">';
+  
+  // Header con ciclo escolar
+  html += `<div style="background: linear-gradient(135deg, #7a1e29 0%, #5d1620 100%); color: white; padding: 15px; border-radius: 8px 8px 0 0; margin: -20px -20px 20px -20px;">`;
+  html += `<h4 style="margin: 0; color: white;">${docente.nombre || 'DOCENTE SIN NOMBRE'}</h4>`;
+  html += `<p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9rem;">📅 ${metadata.ciclo_escolar || ''} | ${metadata.periodo || ''}</p>`;
+  html += `</div>`;
+
+  // Información del docente
+  html += '<div class="horario-info">';
+  html += `<div class="horario-info-item"><strong>RFC:</strong> ${docente.rfc || '-'}</div>`;
+  html += `<div class="horario-info-item"><strong>CURP:</strong> ${docente.curp || '-'}</div>`;
+  html += `<div class="horario-info-item"><strong>Categoría:</strong> ${docente.categoria || '-'}</div>`;
+  html += `<div class="horario-info-item"><strong>Turno:</strong> ${docente.turno || '-'}</div>`;
+  html += `<div class="horario-info-item"><strong>Perfil:</strong> ${docente.perfil || '-'}</div>`;
+  html += `<div class="horario-info-item"><strong>Correo:</strong> ${docente.correo || '-'}</div>`;
+  html += '</div>';
+
+  // Metadatos
+  html += '<div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2196f3;">';
+  html += '<h4 style="color: #1565c0; margin: 0 0 10px 0; font-size: 1rem;">📋 Metadatos</h4>';
+  html += `<p style="margin: 5px 0; font-size: 0.9rem;"><strong>Plantel:</strong> ${metadata.plantel || '-'}</p>`;
+  html += `<p style="margin: 5px 0; font-size: 0.9rem;"><strong>Ubicación:</strong> ${metadata.ubicacion || '-'}</p>`;
+  html += `<p style="margin: 5px 0; font-size: 0.9rem;"><strong>Fecha registro:</strong> ${metadata.fecha_registro || '-'}</p>`;
+  html += `<p style="margin: 5px 0; font-size: 0.85rem; color: #666;"><strong>ID:</strong> ${docId}</p>`;
+  html += '</div>';
+
+  // ✅ NUEVO BLOQUE: Autoridades
+  html += '<div style="background: #fff8e1; padding: 15px; border-radius: 8px; margin: 0 0 20px 0; border-left: 4px solid #ffb300;">';
+  html += '<h4 style="color: #ff6f00; margin: 0 0 10px 0; font-size: 1rem;">👥 Autoridades</h4>';
+  html += `<p style="margin: 4px 0; font-size: 0.9rem;"><strong>Director:</strong> ${autoridades.director || '-'}</p>`;
+  html += `<p style="margin: 4px 0; font-size: 0.9rem;"><strong>Subdirector Técnico:</strong> ${autoridades.subdirector_tecnico || '-'}</p>`;
+  html += `<p style="margin: 4px 0; font-size: 0.9rem;"><strong>Jefe de Servicios Docentes:</strong> ${autoridades.jefe_servicios_docentes || '-'}</p>`;
+  html += '</div>';
+
+  // Carga académica
+  html += '<div class="carga-academica">';
+  html += '<h4 style="color: #7a1e29; margin: 0 0 15px 0;">📚 Carga Académica</h4>';
+  
+  if (!carga.length) {
+    html += '<p style="color:#777;">Sin materias registradas.</p>';
+  } else {
+    // Agrupar por día
+    const porDia = {};
+    carga.forEach(materia => {
+      const dia = materia.dia || 'Sin día';
+      if (!porDia[dia]) porDia[dia] = [];
+      porDia[dia].push(materia);
+    });
+
+    // Ordenar días
+    const diasOrden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    const diasOrdenados = Object.keys(porDia).sort((a, b) => {
+      const indexA = diasOrden.indexOf(a);
+      const indexB = diasOrden.indexOf(b);
+      if (indexA === -1) return 1;
+      if (indexB === -1) return -1;
+      return indexA - indexB;
+    });
+
+    diasOrdenados.forEach(dia => {
+      html += `<div class="carga-item">`;
+      html += `<div class="carga-item-header"><h5>📅 ${dia}</h5></div>`;
+      
+      porDia[dia].forEach(materia => {
+        html += `<div class="carga-item-details">`;
+        html += `<div><strong>Asignatura:</strong> ${materia.asignatura || '-'}</div>`;
+        html += `<div><strong>Grupo:</strong> ${materia.grupo || '-'}</div>`;
+        html += `<div><strong>Horario:</strong> ${materia.hora_inicio || ''} - ${materia.hora_fin || ''}</div>`;
+        html += `<div><strong>Horas:</strong> ${materia.horas || 0}</div>`;
+        html += `<div><strong>Salón:</strong> ${materia.salon || '-'}</div>`;
+        html += `<div><strong>Especialidad:</strong> ${materia.especialidad || '-'}</div>`;
+        html += `</div>`;
+        html += `<hr style="margin: 10px 0; border: none; border-top: 1px solid #ddd;">`;
+      });
+      
+      html += `</div>`;
+    });
+  }
+
+  html += '</div>';
+  html += '</div>';
+  return html;
 }
