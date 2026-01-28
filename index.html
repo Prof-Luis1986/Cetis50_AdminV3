@@ -369,6 +369,11 @@
     }
 
     /* Table */
+    .table-wrapper {
+      width: 100%;
+      overflow-x: auto;
+    }
+
     .data-table {
       width: 100%;
       border-collapse: collapse;
@@ -563,6 +568,7 @@
       <nav class="tabs-nav">
         <button class="tab-btn active" data-tab="avisos-generales">📢 Avisos Generales</button>
         <button class="tab-btn" data-tab="avisos-docentes">👨‍🏫 Avisos Docentes</button>
+        <button class="tab-btn" data-tab="avisos-tutorias">🧑‍🎓 Avisos Tutorías</button>
         <button class="tab-btn" data-tab="usuarios">👥 Gestión Usuarios</button>
         <button class="tab-btn" data-tab="boletas">📊 Importar Boletas</button>
       </nav>
@@ -705,6 +711,7 @@
           <div class="btn-group">
             <button id="horarios-preview-btn" class="btn btn-secondary" disabled>👁️ Previsualizar</button>
             <button id="horarios-upload-btn" class="btn btn-primary" disabled>⬆️ Importar Horarios</button>
+            <button id="horarios-delete-btn" class="btn btn-danger">🗑️ Eliminar horarios (colección)</button>
           </div>
 
           <div id="msg-horarios"></div>
@@ -725,7 +732,121 @@
         </section>
       </div>
 
-      <!-- Tab 3: Gestión de Usuarios -->
+      <!-- Tab 3: Avisos Tutorías -->
+      <div id="tab-avisos-tutorias" class="tab-content">
+        <h2 style="color: var(--vino-700); margin-top:0;">Avisos Tutorías · Reportes de Asistencia</h2>
+        <p style="color:#666; margin-top:-6px;">
+          Registra a los alumnos que no asistieron para consulta posterior de los padres.
+        </p>
+
+        <div style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+          <h3 style="color: var(--vino-700); margin-top:0;">➕ Registrar inasistencia (manual)</h3>
+          <form id="form-aviso-tutoria">
+            <div class="form-row">
+              <div class="form-group">
+                <label for="at-fecha">Fecha *</label>
+                <input type="date" id="at-fecha" required />
+              </div>
+              <div class="form-group">
+                <label for="at-turno">Turno *</label>
+                <select id="at-turno" required>
+                  <option value="">Selecciona...</option>
+                  <option value="matutino">🌅 Matutino</option>
+                  <option value="vespertino">🌙 Vespertino</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="at-grupo">Grupo *</label>
+                <input type="text" id="at-grupo" placeholder="2AVP, 4BP..." required />
+              </div>
+              <div class="form-group">
+                <label for="at-numero-control">Número de control *</label>
+                <input type="text" id="at-numero-control" required />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="at-nombre">Nombre del alumno *</label>
+              <input type="text" id="at-nombre" required />
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="at-motivo">Motivo (opcional)</label>
+                <input type="text" id="at-motivo" />
+              </div>
+              <div class="form-group">
+                <label for="at-observaciones">Observaciones (opcional)</label>
+                <input type="text" id="at-observaciones" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="at-faltas">Cantidad de faltas *</label>
+                <input type="number" id="at-faltas" min="0" step="1" required />
+              </div>
+              <div class="form-group">
+                <label for="at-materias">Materias donde faltó *</label>
+                <input type="text" id="at-materias" placeholder="Ej. Matemáticas, Física" required />
+              </div>
+            </div>
+
+            <div class="btn-group">
+              <button type="submit" class="btn btn-primary">Guardar inasistencia</button>
+              <button type="reset" class="btn btn-secondary">Limpiar</button>
+            </div>
+          </form>
+          <div id="msg-aviso-tutoria"></div>
+        </div>
+
+        <hr style="margin: 40px 0; border: none; border-top: 2px solid var(--gris-medio);" />
+
+        <h3 style="color: var(--vino-700); margin-top:0;">📥 Importar inasistencias desde CSV</h3>
+        <p style="color:#666;">
+          Cada fila representa un alumno ausente. Encabezados obligatorios:
+          <code>fecha, grupo, turno, numero_control, nombre, faltas, materias</code>.
+          Opcionales: <code>motivo, observaciones</code>.
+        </p>
+        <div class="hint">
+          Formato de fecha: <strong>YYYY-MM-DD</strong>. Turno: <strong>matutino</strong> o <strong>vespertino</strong>.
+        </div>
+        <div style="margin-top: 10px; background: var(--gris-claro); padding: 15px; border-radius: 10px;">
+          <code>fecha,grupo,turno,numero_control,nombre,faltas,materias,motivo,observaciones</code><br />
+          <code>2026-01-27,2AVP,matutino,20231234,Juan Pérez,2,Matemáticas y Física,Enfermedad,Presenta justificante</code>
+        </div>
+
+        <div class="file-upload" id="asistencia-upload-area" style="margin-top: 20px;">
+          <input type="file" id="asistencia-file-input" accept=".csv" />
+          <label for="asistencia-file-input">
+            📤 Haz clic para seleccionar archivo CSV de inasistencias
+          </label>
+          <p id="asistencia-file-name" style="margin-top:10px; color:#777;"></p>
+        </div>
+
+        <div class="btn-group">
+          <button id="asistencia-preview-btn" class="btn btn-secondary" disabled>👁️ Previsualizar</button>
+          <button id="asistencia-upload-btn" class="btn btn-primary" disabled>⬆️ Importar inasistencias</button>
+        </div>
+
+        <div id="msg-asistencia"></div>
+        <div id="asistencia-preview-table"></div>
+
+        <hr style="margin: 40px 0; border: none; border-top: 2px solid var(--gris-medio);" />
+
+        <div style="display:flex; align-items:center; justify-content:space-between; gap: 12px; flex-wrap: wrap;">
+          <h3 style="color: var(--vino-700); margin:0;">📋 Reportes recientes</h3>
+          <button id="refresh-reportes-btn" class="btn btn-secondary">Actualizar lista</button>
+        </div>
+        <div id="lista-reportes-asistencia" class="card-list" style="margin-top: 15px;">
+          <p style="color:#777;">Cargando reportes...</p>
+        </div>
+      </div>
+
+      <!-- Tab 4: Gestión de Usuarios -->
       <div id="tab-usuarios" class="tab-content">
         <h2 style="color: var(--vino-700); margin-top:0;">Gestión de Usuarios</h2>
 
@@ -817,7 +938,7 @@
         </div>
       </div>
 
-      <!-- Tab 4: Importar Boletas -->
+      <!-- Tab 5: Importar Boletas -->
       <div id="tab-boletas" class="tab-content">
         <h2 style="color: var(--vino-700); margin-top:0;">Importar Boletas desde CSV</h2>
         

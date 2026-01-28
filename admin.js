@@ -9,6 +9,8 @@ let currentUser = null;
 let csvData = null;
 let boletasData = null;
 let horariosData = null;
+let asistenciaData = null;
+let asistenciaInvalid = 0;
 
 // ==================== ELEMENTOS DOM ====================
 
@@ -35,6 +37,18 @@ const formAvisoDocente = document.getElementById('form-aviso-docente');
 const msgAvisoDocente = document.getElementById('msg-aviso-docente');
 const listaAvisosDocentes = document.getElementById('lista-avisos-docentes');
 
+// Avisos Tutorías
+const formAvisoTutoria = document.getElementById('form-aviso-tutoria');
+const msgAvisoTutoria = document.getElementById('msg-aviso-tutoria');
+const asistenciaFileInput = document.getElementById('asistencia-file-input');
+const asistenciaFileName = document.getElementById('asistencia-file-name');
+const asistenciaPreviewBtn = document.getElementById('asistencia-preview-btn');
+const asistenciaUploadBtn = document.getElementById('asistencia-upload-btn');
+const msgAsistencia = document.getElementById('msg-asistencia');
+const asistenciaPreviewTable = document.getElementById('asistencia-preview-table');
+const refreshReportesBtn = document.getElementById('refresh-reportes-btn');
+const listaReportesAsistencia = document.getElementById('lista-reportes-asistencia');
+
 // Usuarios
 const formUsuarioIndividual = document.getElementById('form-usuario-individual');
 const msgUsuarioIndividual = document.getElementById('msg-usuario-individual');
@@ -60,6 +74,7 @@ const horariosFileInput = document.getElementById('horarios-file-input');
 const horariosFileName = document.getElementById('horarios-file-name');
 const horariosPreviewBtn = document.getElementById('horarios-preview-btn');
 const horariosUploadBtn = document.getElementById('horarios-upload-btn');
+const horariosDeleteBtn = document.getElementById('horarios-delete-btn');
 const msgHorarios = document.getElementById('msg-horarios');
 const horariosPreviewTable = document.getElementById('horarios-preview-table');
 const horarioSearchInput = document.getElementById('horario-search-rfc');
@@ -147,6 +162,7 @@ auth.onAuthStateChanged(async (user) => {
     // Cargar datos iniciales
     cargarAvisosGenerales();
     cargarAvisosDocentes();
+    cargarReportesAsistencia();
     cargarUsuarios();
 
   } catch (e) {
@@ -675,6 +691,301 @@ async function eliminarAvisoDocente(id) {
   }
 }
 
+// ==================== AVISOS TUTORÍAS ====================
+
+function userCanManageTutorias() {
+  return currentUser && (currentUser.permissions.canPublishDocentes || currentUser.permissions.canPublish);
+}
+
+if (formAvisoTutoria) {
+  formAvisoTutoria.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    if (!userCanManageTutorias()) {
+      showMessage(msgAvisoTutoria, 'No tienes permisos para registrar inasistencias.', 'error');
+      return;
+    }
+
+    const fecha = document.getElementById('at-fecha').value;
+    const turno = document.getElementById('at-turno').value;
+    const grupo = document.getElementById('at-grupo').value.trim();
+    const numeroControl = document.getElementById('at-numero-control').value.trim();
+    const nombre = document.getElementById('at-nombre').value.trim();
+    const motivo = document.getElementById('at-motivo').value.trim();
+    const observaciones = document.getElementById('at-observaciones').value.trim();
+    const faltasRaw = document.getElementById('at-faltas').value.trim();
+    const materias = document.getElementById('at-materias').value.trim();
+
+    if (!fecha || !turno || !grupo || !numeroControl || !nombre || !faltasRaw || !materias) {
+      showMessage(
+        msgAvisoTutoria,
+        'Fecha, turno, grupo, número de control, nombre, cantidad de faltas y materias son obligatorios.',
+        'error'
+      );
+      return;
+    }
+
+    const fechaInfo = normalizarFecha(fecha);
+    if (!fechaInfo) {
+      showMessage(msgAvisoTutoria, 'Fecha inválida. Usa formato YYYY-MM-DD.', 'error');
+      return;
+    }
+
+    const faltas = normalizarCantidadFaltas(faltasRaw);
+    if (faltas === null) {
+      showMessage(msgAvisoTutoria, 'Cantidad de faltas inválida. Usa un número entero (0 o mayor).', 'error');
+      return;
+    }
+
+    try {
+      await db.collection('reportes_asistencia').add({
+        fecha: fechaInfo.fecha,
+        fecha_ts: fechaInfo.fechaTs,
+        grupo,
+        turno,
+        numero_control: numeroControl,
+        nombre,
+        faltas,
+        materias,
+        motivo: motivo || null,
+        observaciones: observaciones || null,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        createdBy: currentUser.uid,
+        source: 'manual'
+      });
+
+      showMessage(msgAvisoTutoria, '✅ Inasistencia registrada.', 'success');
+      formAvisoTutoria.reset();
+      cargarReportesAsistencia();
+    } catch (e) {
+      console.error(e);
+      showMessage(msgAvisoTutoria, '❌ Error al guardar: ' + e.message, 'error');
+    }
+  });
+}
+
+if (asistenciaFileInput) {
+  asistenciaFileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      asistenciaFileName.textContent = `📄 ${file.name}`;
+      asistenciaPreviewBtn.disabled = false;
+      asistenciaUploadBtn.disabled = false;
+      asistenciaData = null;
+      asistenciaInvalid = 0;
+      asistenciaPreviewTable.innerHTML = '';
+    } else {
+      asistenciaFileName.textContent = '';
+      asistenciaPreviewBtn.disabled = true;
+      asistenciaUploadBtn.disabled = true;
+      asistenciaPreviewTable.innerHTML = '';
+    }
+  });
+}
+
+if (asistenciaPreviewBtn) {
+  asistenciaPreviewBtn.addEventListener('click', () => {
+    const file = asistenciaFileInput?.files?.[0];
+    if (!file) return;
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const filas = results.data || [];
+        asistenciaData = [];
+        asistenciaInvalid = 0;
+
+        filas.forEach((row) => {
+          const normalizada = normalizarFilaAsistencia(row);
+          if (!normalizada.ok) {
+            asistenciaInvalid += 1;
+            return;
+          }
+          asistenciaData.push(normalizada.data);
+        });
+
+        mostrarPreviewAsistencia(asistenciaData.slice(0, 5));
+        showMessage(
+          msgAsistencia,
+          `✅ ${asistenciaData.length} registros válidos. ${asistenciaInvalid} filas con errores.`,
+          asistenciaInvalid > 0 ? 'info' : 'success'
+        );
+      },
+      error: (error) => {
+        showMessage(msgAsistencia, '❌ Error al leer CSV: ' + error.message, 'error');
+      }
+    });
+  });
+}
+
+if (asistenciaUploadBtn) {
+  asistenciaUploadBtn.addEventListener('click', async () => {
+    if (!userCanManageTutorias()) {
+      showMessage(msgAsistencia, 'No tienes permisos para importar inasistencias.', 'error');
+      return;
+    }
+
+    if (!asistenciaData || asistenciaData.length === 0) {
+      showMessage(msgAsistencia, '❌ Primero previsualiza el CSV.', 'error');
+      return;
+    }
+
+    if (!confirm(`¿Importar ${asistenciaData.length} inasistencias a Firestore?`)) return;
+
+    showMessage(msgAsistencia, '⏳ Importando inasistencias...', 'info');
+
+    let exitosos = 0;
+    let errores = 0;
+    let batch = db.batch();
+    let batchCount = 0;
+
+    try {
+      for (const row of asistenciaData) {
+        const ref = db.collection('reportes_asistencia').doc();
+        batch.set(ref, {
+          ...row,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          createdBy: currentUser.uid,
+          source: 'csv'
+        });
+        batchCount += 1;
+        exitosos += 1;
+
+        if (batchCount >= 450) {
+          await batch.commit();
+          batch = db.batch();
+          batchCount = 0;
+        }
+      }
+
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+    } catch (e) {
+      console.error('Error importando inasistencias:', e);
+      errores += 1;
+    }
+
+    const tipoMensaje = errores > 0 || asistenciaInvalid > 0 ? 'info' : 'success';
+    showMessage(
+      msgAsistencia,
+      `✅ Importación completa: ${exitosos} registros guardados. ${asistenciaInvalid} filas inválidas.`,
+      tipoMensaje
+    );
+
+    asistenciaFileInput.value = '';
+    asistenciaFileName.textContent = '';
+    asistenciaPreviewBtn.disabled = true;
+    asistenciaUploadBtn.disabled = true;
+    asistenciaPreviewTable.innerHTML = '';
+    asistenciaData = null;
+
+    cargarReportesAsistencia();
+  });
+}
+
+if (refreshReportesBtn) {
+  refreshReportesBtn.addEventListener('click', cargarReportesAsistencia);
+}
+
+function mostrarPreviewAsistencia(data) {
+  if (!asistenciaPreviewTable) return;
+  if (data.length === 0) {
+    asistenciaPreviewTable.innerHTML = '<p>No hay datos para mostrar.</p>';
+    return;
+  }
+
+  let html = '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+  const keys = Object.keys(data[0]);
+  keys.forEach(key => {
+    html += `<th>${key}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  data.forEach(row => {
+    html += '<tr>';
+    keys.forEach(key => {
+      const value = row[key];
+      if (value && typeof value === 'object' && value.toDate) {
+        html += `<td>${value.toDate().toLocaleDateString('es-MX')}</td>`;
+      } else {
+        html += `<td>${value ?? ''}</td>`;
+      }
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  asistenciaPreviewTable.innerHTML = html;
+}
+
+async function cargarReportesAsistencia() {
+  if (!listaReportesAsistencia) return;
+
+  try {
+    const snapshot = await db.collection('reportes_asistencia')
+      .orderBy('createdAt', 'desc')
+      .limit(50)
+      .get();
+
+    if (snapshot.empty) {
+      listaReportesAsistencia.innerHTML = '<p style="color:#777;">No hay reportes registrados.</p>';
+      return;
+    }
+
+    let html = '<div class="table-wrapper"><table class="data-table"><thead><tr>';
+    html += '<th>Fecha</th><th>Grupo</th><th>Turno</th><th>Número de control</th><th>Nombre</th><th>Faltas</th><th>Materias</th><th>Motivo</th><th>Observaciones</th><th>Capturado</th><th>Acciones</th>';
+    html += '</tr></thead><tbody>';
+
+    snapshot.forEach(doc => {
+      const r = doc.data();
+      const fecha = r.fecha || (r.fecha_ts?.toDate ? r.fecha_ts.toDate().toLocaleDateString('es-MX') : '-');
+      const creado = r.createdAt?.toDate ? r.createdAt.toDate().toLocaleString('es-MX') : '-';
+      const motivo = r.motivo || '-';
+      const observaciones = r.observaciones || '-';
+      const faltas = r.faltas ?? '-';
+      const materias = r.materias || '-';
+
+      html += `
+        <tr>
+          <td>${fecha}</td>
+          <td>${r.grupo || '-'}</td>
+          <td>${r.turno || '-'}</td>
+          <td>${r.numero_control || '-'}</td>
+          <td>${r.nombre || '-'}</td>
+          <td>${faltas}</td>
+          <td>${materias}</td>
+          <td>${motivo}</td>
+          <td>${observaciones}</td>
+          <td>${creado}</td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="eliminarReporteAsistencia('${doc.id}')">🗑️</button>
+          </td>
+        </tr>
+      `;
+    });
+
+    html += '</tbody></table></div>';
+    listaReportesAsistencia.innerHTML = html;
+  } catch (e) {
+    console.error(e);
+    listaReportesAsistencia.innerHTML = '<p style="color:#c62828;">Error al cargar reportes.</p>';
+  }
+}
+
+async function eliminarReporteAsistencia(id) {
+  if (!confirm('¿Eliminar este reporte de asistencia?')) return;
+  try {
+    await db.collection('reportes_asistencia').doc(id).delete();
+    showMessage(msgAsistencia, '✅ Reporte eliminado.', 'success');
+    cargarReportesAsistencia();
+  } catch (e) {
+    console.error(e);
+    showMessage(msgAsistencia, '❌ Error al eliminar: ' + e.message, 'error');
+  }
+}
+
 // ==================== USUARIOS - REGISTRO INDIVIDUAL ====================
 
 formUsuarioIndividual.addEventListener('submit', async (e) => {
@@ -1086,7 +1397,8 @@ if (horariosUploadBtn) {
         agrupados[docId] = {
           metadata: construirMetadata(row, cicloEscolar),
           docente: construirDocenteDesdeFila(row),
-          carga_academica: []
+          carga_academica_60: [],
+          carga_academica_50: []
         };
       } else {
         // Combinar datos del docente si hay múltiples filas
@@ -1094,9 +1406,13 @@ if (horariosUploadBtn) {
       }
 
       // Agregar materia a la carga académica
-      const materia = construirCargaAcademica(row);
-      if (materia.asignatura) { // Solo agregar si tiene asignatura
-        agrupados[docId].carga_academica.push(materia);
+      const materia60 = construirCargaAcademica(row, '60');
+      const materia50 = construirCargaAcademica(row, '50');
+      if (materia60.asignatura) { // Solo agregar si tiene asignatura
+        agrupados[docId].carga_academica_60.push(materia60);
+      }
+      if (materia50.asignatura) {
+        agrupados[docId].carga_academica_50.push(materia50);
       }
     });
 
@@ -1108,7 +1424,8 @@ if (horariosUploadBtn) {
         await db.collection('horarios_docentes').doc(docId).set({
           metadata: horario.metadata,
           docente: horario.docente,
-          carga_academica: horario.carga_academica,
+          carga_academica_60: horario.carga_academica_60,
+          carga_academica_50: horario.carga_academica_50,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
           importedBy: currentUser?.uid || null
         });
@@ -1132,6 +1449,28 @@ if (horariosUploadBtn) {
     horariosUploadBtn.disabled = true;
     horariosPreviewTable.innerHTML = '';
     horariosData = null;
+  });
+}
+
+if (horariosDeleteBtn) {
+  horariosDeleteBtn.addEventListener('click', async () => {
+    const confirmacion = confirm(
+      '¿Eliminar TODOS los horarios de la colección "horarios_docentes"? Esta acción no se puede deshacer.'
+    );
+    if (!confirmacion) return;
+
+    try {
+      showMessage(msgHorarios, '⏳ Eliminando horarios...', 'info');
+      const eliminados = await eliminarHorariosDocentes();
+      showMessage(
+        msgHorarios,
+        `✅ Eliminación completa: ${eliminados} registros eliminados.`,
+        'success'
+      );
+    } catch (e) {
+      console.error('Error eliminando horarios:', e);
+      showMessage(msgHorarios, '❌ Error eliminando horarios: ' + e.message, 'error');
+    }
   });
 }
 
@@ -1180,7 +1519,164 @@ async function buscarHorarioPorRfc() {
   }
 }
 
+async function eliminarHorariosDocentes() {
+  const batchSize = 400;
+  let totalEliminados = 0;
+
+  while (true) {
+    const snapshot = await db.collection('horarios_docentes')
+      .orderBy(firebase.firestore.FieldPath.documentId())
+      .limit(batchSize)
+      .get();
+
+    if (snapshot.empty) break;
+
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+    totalEliminados += snapshot.size;
+
+    if (snapshot.size < batchSize) break;
+  }
+
+  return totalEliminados;
+}
+
 // ==================== FUNCIONES AUXILIARES ====================
+
+function normalizarClaveCSV(key) {
+  if (!key) return '';
+  const base = String(key).trim().toLowerCase();
+  const sinAcentos = base.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return sinAcentos.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function mapearFilaCSV(row) {
+  const mapped = {};
+  Object.keys(row || {}).forEach((key) => {
+    const cleanKey = normalizarClaveCSV(key);
+    if (!cleanKey) return;
+    const valor = row[key];
+    mapped[cleanKey] = typeof valor === 'string' ? valor.trim() : valor;
+  });
+  return mapped;
+}
+
+function obtenerValorCSV(mapped, keys) {
+  for (const key of keys) {
+    const valor = mapped[key];
+    if (valor !== undefined && valor !== null && String(valor).trim() !== '') {
+      return valor;
+    }
+  }
+  return '';
+}
+
+function normalizarTurno(valor) {
+  const raw = String(valor || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (['m', 'mat', 'matutino', 'manana', 'mañana'].includes(raw)) return 'matutino';
+  if (['v', 'ves', 'vespertino', 'tarde'].includes(raw)) return 'vespertino';
+  return '';
+}
+
+function normalizarFecha(valor) {
+  if (!valor) return null;
+  const raw = String(valor).trim();
+  if (!raw) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const date = new Date(`${raw}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return null;
+    return {
+      fecha: raw,
+      fechaTs: firebase.firestore.Timestamp.fromDate(date)
+    };
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const yyyy = parsed.getFullYear();
+  const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+  const dd = String(parsed.getDate()).padStart(2, '0');
+  const normalized = `${yyyy}-${mm}-${dd}`;
+  return {
+    fecha: normalized,
+    fechaTs: firebase.firestore.Timestamp.fromDate(new Date(`${normalized}T00:00:00`))
+  };
+}
+
+function normalizarCantidadFaltas(valor) {
+  if (valor === undefined || valor === null) return null;
+  const raw = String(valor).trim();
+  if (!raw) return null;
+  const numero = Number(raw);
+  if (!Number.isFinite(numero) || !Number.isInteger(numero) || numero < 0) return null;
+  return numero;
+}
+
+function normalizarFilaAsistencia(row) {
+  const mapped = mapearFilaCSV(row);
+  const fechaInfo = normalizarFecha(obtenerValorCSV(mapped, ['fecha']));
+  const grupo = String(obtenerValorCSV(mapped, ['grupo'])).trim();
+  const turno = normalizarTurno(obtenerValorCSV(mapped, ['turno']));
+  const numeroControl = String(obtenerValorCSV(mapped, [
+    'numero_control',
+    'numero_de_control',
+    'numero',
+    'no_control',
+    'nocontrol',
+    'num_control',
+    'numcontrol',
+    'numerocontrol'
+  ])).trim();
+  const nombre = String(obtenerValorCSV(mapped, ['nombre', 'nombre_alumno', 'alumno'])).trim();
+  const faltasRaw = obtenerValorCSV(mapped, [
+    'faltas',
+    'cantidad_faltas',
+    'num_faltas',
+    'numero_faltas',
+    'total_faltas'
+  ]);
+  const faltas = normalizarCantidadFaltas(faltasRaw);
+  const materias = String(obtenerValorCSV(mapped, [
+    'materias',
+    'materias_faltadas',
+    'materias_donde_falto',
+    'materias_falto'
+  ])).trim();
+  const motivo = String(obtenerValorCSV(mapped, ['motivo'])).trim();
+  const observaciones = String(obtenerValorCSV(mapped, ['observaciones', 'observacion', 'obs'])).trim();
+
+  const errores = [];
+  if (!fechaInfo) errores.push('fecha');
+  if (!grupo) errores.push('grupo');
+  if (!turno) errores.push('turno');
+  if (!numeroControl) errores.push('numero_control');
+  if (!nombre) errores.push('nombre');
+  if (faltas === null) errores.push('faltas');
+  if (!materias) errores.push('materias');
+
+  if (errores.length > 0) {
+    return { ok: false, errors: errores };
+  }
+
+  return {
+    ok: true,
+    data: {
+      fecha: fechaInfo.fecha,
+      fecha_ts: fechaInfo.fechaTs,
+      grupo,
+      turno,
+      numero_control: numeroControl,
+      nombre,
+      faltas,
+      materias,
+      motivo: motivo || null,
+      observaciones: observaciones || null
+    }
+  };
+}
 
 function showMessage(element, msg, type = 'info') {
   element.innerHTML = `<div class="message ${type}">${msg}</div>`;
@@ -1233,7 +1729,7 @@ function obtenerAutoridades(turno) {
 // ✅ MODIFICADA: Ahora incluye autoridades
 function construirMetadata(row, cicloEscolar) {
   const ahora = new Date();
-  const turno = row.turno || row.docente_turno || '';
+  const turno = row.turno || row.docente_turno || row.turno_calculado || '';
 
   const metadataBase = {
     ciclo_escolar: cicloEscolar,
@@ -1241,7 +1737,10 @@ function construirMetadata(row, cicloEscolar) {
     fecha_registro: ahora.toISOString().split('T')[0],
     origen_documento: row.origen_documento || 'DGETI - DISTRIBUCIÓN DE ACTIVIDADES ACADÉMICAS',
     plantel: (row.plantel || 'CETIS 50').toUpperCase(),
-    ubicacion: (row.ubicacion || 'IZTAPALAPA, CDMX').toUpperCase()
+    ubicacion: (row.ubicacion || 'IZTAPALAPA, CDMX').toUpperCase(),
+    turno_calculado: row.turno_calculado || null,
+    jornada_fin_oficial: row.jornada_fin_oficial || null,
+    jornada_fin_practica: row.jornada_fin_practica || null
   };
 
   const autoridades = obtenerAutoridades(turno);
@@ -1272,17 +1771,62 @@ function combinarDocenteData(destino, fuente) {
   });
 }
 
-function construirCargaAcademica(row) {
+function parseTimeToMinutes(value) {
+  if (!value) return null;
+  const [hh, mm] = value.split(':').map((part) => Number(part));
+  if (Number.isNaN(hh) || Number.isNaN(mm)) return null;
+  return hh * 60 + mm;
+}
+
+function formatMinutesToTime(minutes) {
+  if (minutes == null) return '';
+  const total = (minutes + 24 * 60) % (24 * 60);
+  const hh = String(Math.floor(total / 60)).padStart(2, '0');
+  const mm = String(total % 60).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function calcularHorario50(row) {
+  const inicioBase = row.hora_inicio_60 || row.hora_inicio || '';
+  const finBase = row.hora_fin_60 || row.hora_fin || '';
+  const offsetMin = Number(row.offset_min);
+  const inicioMin = parseTimeToMinutes(inicioBase);
+  const finMin = parseTimeToMinutes(finBase);
+
+  if (inicioMin == null || finMin == null) {
+    return { hora_inicio: row.hora_inicio_50 || '', hora_fin: row.hora_fin_50 || '' };
+  }
+
+  if (!Number.isNaN(offsetMin)) {
+    const inicioCalc = inicioMin + offsetMin;
+    return { hora_inicio: formatMinutesToTime(inicioCalc), hora_fin: formatMinutesToTime(inicioCalc + 50) };
+  }
+
+  return { hora_inicio: formatMinutesToTime(inicioMin - 10), hora_fin: formatMinutesToTime(finMin - 20) };
+}
+
+function construirCargaAcademica(row, tipo = '60') {
+  const horario50 = calcularHorario50(row);
+  const horaInicio = tipo === '50'
+    ? (row.hora_inicio_50 || horario50.hora_inicio || '')
+    : (row.hora_inicio_60 || row.hora_inicio || '');
+  const horaFin = tipo === '50'
+    ? (row.hora_fin_50 || horario50.hora_fin || '')
+    : (row.hora_fin_60 || row.hora_fin || '');
+
   return {
     asignatura: row.asignatura || '',
     grupo: row.grupo || '',
     salon: row.salon || '',
     especialidad: row.especialidad || '',
     dia: row.dia || '',
-    hora_inicio: row.hora_inicio || '',
-    hora_fin: row.hora_fin || '',
+    hora_inicio: horaInicio,
+    hora_fin: horaFin,
     horas: Number(row.horas) || 0,
-    aula_tipo: row.aula_tipo || ''
+    aula_tipo: row.aula_tipo || '',
+    tipo_horario: tipo,
+    offset_min: Number(row.offset_min) || null,
+    flag_fuera_jornada_practica: row.flag_fuera_jornada_practica || null
   };
 }
 
@@ -1315,7 +1859,10 @@ function mostrarPreviewHorarios(data) {
 function renderHorarioResult(data, docId) {
   const metadata = data?.metadata || {};
   const docente = data?.docente || {};
-  const carga = Array.isArray(data?.carga_academica) ? data.carga_academica : [];
+  const carga60 = Array.isArray(data?.carga_academica_60) ? data.carga_academica_60 : [];
+  const carga50 = Array.isArray(data?.carga_academica_50) ? data.carga_academica_50 : [];
+  const cargaLegacy = Array.isArray(data?.carga_academica) ? data.carga_academica : [];
+  const turno = (docente.turno || metadata.turno_calculado || '').toLowerCase();
   const autoridades = metadata.autoridades || {};
 
   let html = '<div class="horario-card">';
@@ -1356,33 +1903,86 @@ function renderHorarioResult(data, docId) {
   // Carga académica
   html += '<div class="carga-academica">';
   html += '<h4 style="color: #7a1e29; margin: 0 0 15px 0;">📚 Carga Académica</h4>';
-  
+
+  const hasNew = carga60.length || carga50.length;
+  if (!hasNew && !cargaLegacy.length) {
+    html += '<p style="color:#777;">Sin materias registradas.</p>';
+  } else if (!hasNew) {
+    html += renderCargaAcademica(cargaLegacy, 'Horario', turno);
+  } else {
+    html += renderCargaAcademica(carga60, 'Horario Oficial (60 min)', turno);
+    html += renderCargaAcademica(carga50, 'Horario Práctico (50 min)', turno);
+  }
+
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+function renderCargaAcademica(carga, titulo, turno) {
+  let html = `<div style="margin-bottom: 20px;">`;
+  html += `<h5 style="margin: 0 0 10px 0; color: #5d1620;">${titulo}</h5>`;
+
   if (!carga.length) {
     html += '<p style="color:#777;">Sin materias registradas.</p>';
-  } else {
-    // Agrupar por día
-    const porDia = {};
-    carga.forEach(materia => {
-      const dia = materia.dia || 'Sin día';
-      if (!porDia[dia]) porDia[dia] = [];
-      porDia[dia].push(materia);
+    html += '</div>';
+    return html;
+  }
+
+  const porDia = {};
+  carga.forEach(materia => {
+    const dia = materia.dia || 'Sin día';
+    if (!porDia[dia]) porDia[dia] = [];
+    porDia[dia].push(materia);
+  });
+
+  const diasOrden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const diasOrdenados = Object.keys(porDia).sort((a, b) => {
+    const indexA = diasOrden.indexOf(a);
+    const indexB = diasOrden.indexOf(b);
+    if (indexA === -1) return 1;
+    if (indexB === -1) return -1;
+    return indexA - indexB;
+  });
+
+  diasOrdenados.forEach(dia => {
+    html += `<div class="carga-item">`;
+    html += `<div class="carga-item-header"><h5>📅 ${dia}</h5></div>`;
+
+    const materiasOrdenadas = porDia[dia].slice().sort((a, b) => {
+      const aMin = parseTimeToMinutes(a.hora_inicio);
+      const bMin = parseTimeToMinutes(b.hora_inicio);
+      if (aMin == null) return 1;
+      if (bMin == null) return -1;
+      return aMin - bMin;
     });
 
-    // Ordenar días
-    const diasOrden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-    const diasOrdenados = Object.keys(porDia).sort((a, b) => {
-      const indexA = diasOrden.indexOf(a);
-      const indexB = diasOrden.indexOf(b);
-      if (indexA === -1) return 1;
-      if (indexB === -1) return -1;
-      return indexA - indexB;
-    });
+    if (turno.includes('matutino')) {
+      materiasOrdenadas.push({
+        asignatura: 'RECESO',
+        hora_inicio: '10:15',
+        hora_fin: '10:45',
+        receso: true
+      });
+    }
 
-    diasOrdenados.forEach(dia => {
-      html += `<div class="carga-item">`;
-      html += `<div class="carga-item-header"><h5>📅 ${dia}</h5></div>`;
-      
-      porDia[dia].forEach(materia => {
+    materiasOrdenadas
+      .sort((a, b) => {
+        const aMin = parseTimeToMinutes(a.hora_inicio);
+        const bMin = parseTimeToMinutes(b.hora_inicio);
+        if (aMin == null) return 1;
+        if (bMin == null) return -1;
+        return aMin - bMin;
+      })
+      .forEach(materia => {
+        if (materia.receso) {
+          html += `<div class="carga-item-details">`;
+          html += `<div><strong>Receso:</strong> ${materia.hora_inicio} - ${materia.hora_fin}</div>`;
+          html += `</div>`;
+          html += `<hr style="margin: 10px 0; border: none; border-top: 1px solid #ddd;">`;
+          return;
+        }
+
         html += `<div class="carga-item-details">`;
         html += `<div><strong>Asignatura:</strong> ${materia.asignatura || '-'}</div>`;
         html += `<div><strong>Grupo:</strong> ${materia.grupo || '-'}</div>`;
@@ -1393,12 +1993,10 @@ function renderHorarioResult(data, docId) {
         html += `</div>`;
         html += `<hr style="margin: 10px 0; border: none; border-top: 1px solid #ddd;">`;
       });
-      
-      html += `</div>`;
-    });
-  }
 
-  html += '</div>';
+    html += `</div>`;
+  });
+
   html += '</div>';
   return html;
 }
