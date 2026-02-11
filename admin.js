@@ -3,7 +3,8 @@
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-const DOMINIO = 'cetis50cdmx.com';
+const DOMINIOS_PERMITIDOS = ['cetis50cdmx.com', 'cetis50cdmx.edu.mx'];
+const DOMINIOS_PERMITIDOS_LABEL = DOMINIOS_PERMITIDOS.map((d) => '@' + d).join(' o ');
 
 let currentUser = null;
 let csvData = null;
@@ -83,6 +84,26 @@ const horarioSearchResult = document.getElementById('horario-search-result');
 
 // ==================== AUTH ====================
 
+function getEmailDomain(email = '') {
+  return (email.split('@')[1] || '').toLowerCase();
+}
+
+function isAllowedDomain(email = '') {
+  return DOMINIOS_PERMITIDOS.includes(getEmailDomain(email));
+}
+
+function userCanPublishGeneral() {
+  return !!(currentUser && currentUser.permissions && currentUser.permissions.canPublish);
+}
+
+function userCanPublishDocentes() {
+  return !!(currentUser && currentUser.permissions && currentUser.permissions.canPublishDocentes);
+}
+
+function userCanManageUsers() {
+  return userCanPublishGeneral();
+}
+
 auth.onAuthStateChanged(async (user) => {
   if (!user) {
     loginSection.classList.remove('hidden');
@@ -91,9 +112,8 @@ auth.onAuthStateChanged(async (user) => {
     return;
   }
 
-  const dominio = user.email.split('@')[1] || '';
-  if (dominio.toLowerCase() !== DOMINIO.toLowerCase()) {
-    showLoginMessage('Solo se permite acceso con correo @' + DOMINIO, 'error');
+  if (!isAllowedDomain(user.email || '')) {
+    showLoginMessage('Solo se permite acceso con correo ' + DOMINIOS_PERMITIDOS_LABEL, 'error');
     await auth.signOut();
     return;
   }
@@ -159,11 +179,25 @@ auth.onAuthStateChanged(async (user) => {
     loginSection.classList.add('hidden');
     adminPanel.classList.remove('hidden');
 
-    // Cargar datos iniciales
+    // Cargar datos iniciales según permisos
     cargarAvisosGenerales();
-    cargarAvisosDocentes();
-    cargarReportesAsistencia();
-    cargarUsuarios();
+    if (userCanPublishDocentes()) {
+      cargarAvisosDocentes();
+    } else {
+      listaAvisosDocentes.innerHTML = '<p style="color:#777;">No tienes permisos para consultar avisos docentes.</p>';
+    }
+
+    if (userCanManageTutorias()) {
+      cargarReportesAsistencia();
+    } else {
+      listaReportesAsistencia.innerHTML = '<p style="color:#777;">No tienes permisos para consultar reportes de asistencia.</p>';
+    }
+
+    if (userCanManageUsers()) {
+      cargarUsuarios();
+    } else {
+      listaUsuarios.innerHTML = '<p style="color:#777;">No tienes permisos para gestionar usuarios.</p>';
+    }
 
   } catch (e) {
     console.error('Error verificando permisos:', e);
@@ -175,9 +209,6 @@ auth.onAuthStateChanged(async (user) => {
 loginBtn.addEventListener('click', async () => {
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({
-      hd: DOMINIO
-    });
     await auth.signInWithPopup(provider);
   } catch (e) {
     console.error(e);
@@ -629,6 +660,13 @@ formAvisoDocente.addEventListener('submit', async (e) => {
 });
 
 async function cargarAvisosDocentes() {
+  if (!userCanPublishDocentes()) {
+    if (listaAvisosDocentes) {
+      listaAvisosDocentes.innerHTML = '<p style="color:#777;">No tienes permisos para consultar avisos docentes.</p>';
+    }
+    return;
+  }
+
   try {
     const snapshot = await db.collection('docentesAnnouncements')
       .orderBy('createdAt', 'desc')
@@ -694,7 +732,7 @@ async function eliminarAvisoDocente(id) {
 // ==================== AVISOS TUTORÍAS ====================
 
 function userCanManageTutorias() {
-  return currentUser && (currentUser.permissions.canPublishDocentes || currentUser.permissions.canPublish);
+  return !!(currentUser && currentUser.permissions && (currentUser.permissions.canPublishDocentes || currentUser.permissions.canPublish));
 }
 
 if (formAvisoTutoria) {
@@ -922,6 +960,10 @@ function mostrarPreviewAsistencia(data) {
 
 async function cargarReportesAsistencia() {
   if (!listaReportesAsistencia) return;
+  if (!userCanManageTutorias()) {
+    listaReportesAsistencia.innerHTML = '<p style="color:#777;">No tienes permisos para consultar reportes de asistencia.</p>';
+    return;
+  }
 
   try {
     const snapshot = await db.collection('reportes_asistencia')
@@ -991,6 +1033,11 @@ async function eliminarReporteAsistencia(id) {
 formUsuarioIndividual.addEventListener('submit', async (e) => {
   e.preventDefault();
 
+  if (!userCanManageUsers()) {
+    showMessage(msgUsuarioIndividual, 'No tienes permisos para gestionar usuarios.', 'error');
+    return;
+  }
+
   const email = document.getElementById('ui-email').value.trim().toLowerCase();
   const nombre = document.getElementById('ui-nombre').value.trim();
   const turno = document.getElementById('ui-turno').value || null;
@@ -999,11 +1046,10 @@ formUsuarioIndividual.addEventListener('submit', async (e) => {
   const canPublishDocentes = document.getElementById('ui-canPublishDocentes').checked;
 
   // Validar dominio
-  const dominio = email.split('@')[1] || '';
-  if (dominio.toLowerCase() !== DOMINIO.toLowerCase()) {
+  if (!isAllowedDomain(email)) {
     showMessage(
       msgUsuarioIndividual,
-      `❌ El correo debe ser del dominio @${DOMINIO}`,
+      `❌ El correo debe ser del dominio ${DOMINIOS_PERMITIDOS_LABEL}`,
       'error'
     );
     return;
@@ -1085,6 +1131,11 @@ csvPreviewBtn.addEventListener('click', () => {
 });
 
 csvUploadBtn.addEventListener('click', async () => {
+  if (!userCanManageUsers()) {
+    showMessage(msgCsv, 'No tienes permisos para gestionar usuarios.', 'error');
+    return;
+  }
+
   if (!csvData || csvData.length === 0) {
     showMessage(msgCsv, '❌ Primero previsualiza el CSV.', 'error');
     return;
@@ -1106,9 +1157,8 @@ csvUploadBtn.addEventListener('click', async () => {
       }
 
       // Validar dominio
-      const dominio = email.split('@')[1] || '';
-      if (dominio.toLowerCase() !== DOMINIO.toLowerCase()) {
-        console.warn(`Email ${email} no es del dominio ${DOMINIO}, omitiendo...`);
+      if (!isAllowedDomain(email)) {
+        console.warn(`Email ${email} no pertenece a dominios permitidos (${DOMINIOS_PERMITIDOS_LABEL}), omitiendo...`);
         errores++;
         continue;
       }
@@ -1167,9 +1217,18 @@ function mostrarPreviewCSV(data) {
 
 // ==================== USUARIOS - LISTA ====================
 
-refreshUsuariosBtn.addEventListener('click', cargarUsuarios);
+if (refreshUsuariosBtn) {
+  refreshUsuariosBtn.addEventListener('click', cargarUsuarios);
+}
 
 async function cargarUsuarios() {
+  if (!userCanManageUsers()) {
+    if (listaUsuarios) {
+      listaUsuarios.innerHTML = '<p style="color:#777;">No tienes permisos para gestionar usuarios.</p>';
+    }
+    return;
+  }
+
   try {
     const snapshot = await db.collection('users')
       .orderBy('createdAt', 'desc')
