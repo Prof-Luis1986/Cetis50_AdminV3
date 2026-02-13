@@ -5,6 +5,7 @@ const db = firebase.firestore();
 
 const DOMINIOS_PERMITIDOS = ['cetis50cdmx.com', 'cetis50cdmx.edu.mx'];
 const DOMINIOS_PERMITIDOS_LABEL = DOMINIOS_PERMITIDOS.map((d) => '@' + d).join(' o ');
+const ANNOUNCEMENT_PUBLIC_CATEGORIES = ['general', 'eventos', 'vinculacion'];
 
 let currentUser = null;
 let csvData = null;
@@ -90,6 +91,11 @@ function getEmailDomain(email = '') {
 
 function isAllowedDomain(email = '') {
   return DOMINIOS_PERMITIDOS.includes(getEmailDomain(email));
+}
+
+function hasInstitutionalSession() {
+  const email = currentUser?.email || auth.currentUser?.email || '';
+  return !!email && isAllowedDomain(email);
 }
 
 function userCanPublishGeneral() {
@@ -209,7 +215,8 @@ auth.onAuthStateChanged(async (user) => {
 loginBtn.addEventListener('click', async () => {
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
-    await auth.signInWithPopup(provider);
+    // Redirect avoids popup window COOP warnings in modern browsers.
+    await auth.signInWithRedirect(provider);
   } catch (e) {
     console.error(e);
     showLoginMessage('Error al iniciar sesión: ' + e.message, 'error');
@@ -326,13 +333,41 @@ function mostrarModalPreview(data) {
   };
   const categoriaTexto = `${categoriaEmoji[data.category] || '📢'} ${data.category.charAt(0).toUpperCase() + data.category.slice(1)}`;
 
+  const pdfInfo = getPdfPreviewInfo(data.linkUrl || '');
+
   // Enlace
-  const enlaceHTML = data.linkUrl 
+  const enlaceHTML = data.linkUrl
     ? `<div style="margin-top: 15px;">
-         <a href="${data.linkUrl}" target="_blank" style="color: #7a1e29; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
-           🔗 Ver más información
+         <a href="${data.linkUrl}" target="_blank" rel="noopener" style="color: #7a1e29; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
+           🔗 Abrir en nueva pestaña
          </a>
        </div>`
+    : '';
+
+  const pdfViewerHTML = pdfInfo
+    ? `
+      <div style="margin: 20px 0; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden;">
+        <div style="display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; background: #f8f8f8; border-bottom: 1px solid #e0e0e0;">
+          <strong style="color: #7a1e29;">Vista previa PDF</strong>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button id="pdf-zoom-out" type="button" style="padding: 6px 10px; border: 1px solid #d3d3d3; background: white; border-radius: 6px; cursor: pointer;">-</button>
+            <button id="pdf-zoom-reset" type="button" style="padding: 6px 10px; border: 1px solid #d3d3d3; background: white; border-radius: 6px; cursor: pointer;">100%</button>
+            <button id="pdf-zoom-in" type="button" style="padding: 6px 10px; border: 1px solid #d3d3d3; background: white; border-radius: 6px; cursor: pointer;">+</button>
+            <button id="pdf-fullscreen" type="button" style="padding: 6px 10px; border: 1px solid #d3d3d3; background: white; border-radius: 6px; cursor: pointer;">Pantalla completa</button>
+          </div>
+        </div>
+        <div id="pdf-frame-wrap" style="background: #f0f0f0; overflow: auto; max-height: 70vh;">
+          <iframe
+            id="pdf-preview-frame"
+            src="${pdfInfo.embedUrl}"
+            style="width: 100%; height: 72vh; border: none; transform-origin: top left;"
+            loading="lazy"
+            allowfullscreen
+            title="Vista previa de PDF"
+          ></iframe>
+        </div>
+      </div>
+    `
     : '';
 
   modalContent.innerHTML = `
@@ -379,6 +414,7 @@ function mostrarModalPreview(data) {
         ${data.content}
       </div>
 
+      ${pdfViewerHTML}
       ${enlaceHTML}
 
       <hr style="border: none; border-top: 2px solid #f0f0f0; margin: 25px 0;">
@@ -424,6 +460,12 @@ function mostrarModalPreview(data) {
   const closeBtn = document.getElementById('close-modal');
   const modalCloseBtn = document.getElementById('modal-close-btn');
   const modalNewBtn = document.getElementById('modal-new-btn');
+  const zoomOutBtn = document.getElementById('pdf-zoom-out');
+  const zoomInBtn = document.getElementById('pdf-zoom-in');
+  const zoomResetBtn = document.getElementById('pdf-zoom-reset');
+  const fullscreenBtn = document.getElementById('pdf-fullscreen');
+  const pdfFrame = document.getElementById('pdf-preview-frame');
+  const pdfWrap = document.getElementById('pdf-frame-wrap');
 
   closeBtn.addEventListener('mouseenter', () => {
     closeBtn.style.background = 'rgba(255,255,255,0.3)';
@@ -451,6 +493,44 @@ function mostrarModalPreview(data) {
   modalNewBtn.addEventListener('mouseleave', () => {
     modalNewBtn.style.background = '#f5f5f5';
   });
+
+  if (pdfFrame && pdfWrap) {
+    let zoom = 1;
+    const applyZoom = () => {
+      pdfFrame.style.transform = `scale(${zoom})`;
+      pdfFrame.style.width = `${100 / zoom}%`;
+      pdfFrame.style.height = `${72 / zoom}vh`;
+    };
+
+    const clampZoom = (value) => Math.max(0.6, Math.min(2, value));
+
+    zoomOutBtn?.addEventListener('click', () => {
+      zoom = clampZoom(zoom - 0.1);
+      applyZoom();
+    });
+
+    zoomInBtn?.addEventListener('click', () => {
+      zoom = clampZoom(zoom + 0.1);
+      applyZoom();
+    });
+
+    zoomResetBtn?.addEventListener('click', () => {
+      zoom = 1;
+      applyZoom();
+    });
+
+    fullscreenBtn?.addEventListener('click', async () => {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+          return;
+        }
+        await pdfWrap.requestFullscreen();
+      } catch (err) {
+        console.warn('No se pudo activar pantalla completa:', err);
+      }
+    });
+  }
 
   // Cerrar modal
   const cerrarModal = () => {
@@ -547,18 +627,44 @@ formAvisoGeneral.addEventListener('submit', async (e) => {
 
 async function cargarAvisosGenerales() {
   try {
-    const snapshot = await db.collection('announcements')
+    const queryPublic = db.collection('announcements')
+      .where('category', 'in', ANNOUNCEMENT_PUBLIC_CATEGORIES)
       .orderBy('createdAt', 'desc')
       .limit(20)
       .get();
 
-    if (snapshot.empty) {
+    const canReadAlumnos = hasInstitutionalSession();
+    const queryAlumnos = canReadAlumnos
+      ? db.collection('announcements')
+          .where('category', '==', 'alumnos')
+          .orderBy('createdAt', 'desc')
+          .limit(20)
+          .get()
+      : Promise.resolve(null);
+
+    const [publicSnap, alumnosSnap] = await Promise.all([queryPublic, queryAlumnos]);
+    const docsById = new Map();
+
+    (publicSnap?.docs || []).forEach((doc) => docsById.set(doc.id, doc));
+    (alumnosSnap?.docs || []).forEach((doc) => docsById.set(doc.id, doc));
+
+    const orderedDocs = Array.from(docsById.values())
+      .sort((a, b) => {
+        const aCreatedAt = a.data().createdAt;
+        const bCreatedAt = b.data().createdAt;
+        const ta = aCreatedAt && typeof aCreatedAt.toMillis === 'function' ? aCreatedAt.toMillis() : 0;
+        const tb = bCreatedAt && typeof bCreatedAt.toMillis === 'function' ? bCreatedAt.toMillis() : 0;
+        return tb - ta;
+      })
+      .slice(0, 20);
+
+    if (!orderedDocs.length) {
       listaAvisosGenerales.innerHTML = '<p style="color:#777;">No hay avisos publicados.</p>';
       return;
     }
 
     let html = '';
-    snapshot.forEach(doc => {
+    orderedDocs.forEach(doc => {
       const aviso = doc.data();
       const fecha = aviso.createdAt?.toDate 
         ? aviso.createdAt.toDate().toLocaleDateString('es-MX')
@@ -598,7 +704,43 @@ async function cargarAvisosGenerales() {
     listaAvisosGenerales.innerHTML = html;
   } catch (e) {
     console.error(e);
+    if (e && e.code === 'permission-denied') {
+      listaAvisosGenerales.innerHTML = '<p style="color:#c62828;">No tienes permiso para leer alguna categoría de avisos (permission-denied).</p>';
+      return;
+    }
     listaAvisosGenerales.innerHTML = '<p style="color:#c62828;">Error al cargar avisos.</p>';
+  }
+}
+
+function getPdfPreviewInfo(linkUrl = '') {
+  const raw = (linkUrl || '').trim();
+  if (!raw) return null;
+
+  const isDirectPdf = /\.pdf(?:$|[?#])/i.test(raw);
+  if (isDirectPdf) {
+    return { embedUrl: raw };
+  }
+
+  try {
+    const url = new URL(raw);
+    const host = (url.hostname || '').toLowerCase();
+    const path = url.pathname || '';
+
+    if (!host.includes('drive.google.com')) return null;
+
+    let fileId = '';
+    const fileMatch = path.match(/\/file\/d\/([^/]+)/i);
+    if (fileMatch && fileMatch[1]) {
+      fileId = fileMatch[1];
+    }
+    if (!fileId) {
+      fileId = url.searchParams.get('id') || '';
+    }
+    if (!fileId) return null;
+
+    return { embedUrl: `https://drive.google.com/file/d/${fileId}/preview` };
+  } catch (_) {
+    return null;
   }
 }
 
@@ -1268,6 +1410,10 @@ async function cargarUsuarios() {
     listaUsuarios.innerHTML = html;
   } catch (e) {
     console.error(e);
+    if (e && e.code === 'permission-denied') {
+      listaUsuarios.innerHTML = '<p style="color:#c62828;">No tienes permiso en reglas de Firestore para listar usuarios (permission-denied).</p>';
+      return;
+    }
     listaUsuarios.innerHTML = '<p style="color:#c62828;">Error al cargar usuarios.</p>';
   }
 }
