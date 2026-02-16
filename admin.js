@@ -1,5 +1,9 @@
 // ==================== ADMIN.JS ====================
 
+if ((!firebase.apps || !firebase.apps.length) && window.__FIREBASE_CONFIG__) {
+  firebase.initializeApp(window.__FIREBASE_CONFIG__);
+}
+
 const auth = firebase.auth();
 const db = firebase.firestore();
 
@@ -213,13 +217,35 @@ auth.onAuthStateChanged(async (user) => {
 });
 
 loginBtn.addEventListener('click', async () => {
+  loginBtn.disabled = true;
+  const originalLabel = loginBtn.textContent;
+  loginBtn.textContent = 'Abriendo acceso...';
   try {
     const provider = new firebase.auth.GoogleAuthProvider();
-    // Redirect avoids popup window COOP warnings in modern browsers.
-    await auth.signInWithRedirect(provider);
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      await auth.signInWithPopup(provider);
+    } catch (popupError) {
+      // Fallback to redirect for browsers/environments that block popups.
+      const code = popupError && popupError.code ? String(popupError.code) : '';
+      const shouldFallbackToRedirect =
+        code === 'auth/popup-blocked' ||
+        code === 'auth/cancelled-popup-request' ||
+        code === 'auth/popup-closed-by-user' ||
+        code === 'auth/operation-not-supported-in-this-environment';
+
+      if (shouldFallbackToRedirect) {
+        await auth.signInWithRedirect(provider);
+        return;
+      }
+      throw popupError;
+    }
   } catch (e) {
     console.error(e);
     showLoginMessage('Error al iniciar sesión: ' + e.message, 'error');
+  } finally {
+    loginBtn.disabled = false;
+    loginBtn.textContent = originalLabel;
   }
 });
 

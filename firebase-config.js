@@ -12,6 +12,7 @@
     messagingSenderId: "202492003192",
     appId: "1:202492003192:web:0212f791eb0a4740cd3e8d"
   };
+  window.__FIREBASE_CONFIG__ = firebaseConfig;
 
   if (typeof firebase === 'undefined') {
     console.error('Firebase SDK no cargado. Asegúrate de incluir firebase-app-compat.js antes de este archivo.');
@@ -19,11 +20,19 @@
   }
 
   try {
-    firebase.initializeApp(firebaseConfig);
+    if (!firebase.apps || !firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
   } catch(e){
-    // Puede lanzar si ya fue inicializado, se ignora.
+    const code = e && e.code ? String(e.code) : '';
+    const isDuplicate = code === 'app/duplicate-app' || /already exists/i.test(String(e.message || ''));
+    if (!isDuplicate) {
+      console.error('Error inicializando Firebase:', e);
+    }
   }
 
   // Exportar referencia a Firestore para usar en app.js
-  window.db = firebase.firestore();
+  if (firebase.apps && firebase.apps.length) {
+    window.db = firebase.firestore();
+  }
 })();
