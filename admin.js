@@ -117,6 +117,20 @@ function userCanManageUsers() {
   return userCanPublishGeneral();
 }
 
+function asBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    return v === 'true' || v === '1' || v === 'si' || v === 'sí';
+  }
+  if (typeof value === 'number') return value === 1;
+  return false;
+}
+
+function hasAdminPermissions(userData = {}) {
+  return asBoolean(userData.canPublish) || asBoolean(userData.canPublishDocentes);
+}
+
 auth.onAuthStateChanged(async (user) => {
   if (!user) {
     loginSection.classList.remove('hidden');
@@ -223,8 +237,42 @@ auth.onAuthStateChanged(async (user) => {
       }
     }
 
-    const userData = userDoc.data();
-    if (!userData.canPublish && !userData.canPublishDocentes) {
+    let userData = userDoc.data() || {};
+    if (!hasAdminPermissions(userData)) {
+      // Si el doc por UID no tiene permisos, buscar otro doc del mismo email que sí los tenga y reconciliar.
+      const normalizedEmail = (user.email || '').toLowerCase();
+      try {
+        const candidates = await db
+          .collection('users')
+          .where('email', '==', normalizedEmail)
+          .limit(5)
+          .get();
+
+        const adminCandidate = candidates.docs.find((d) => hasAdminPermissions(d.data() || {}));
+        if (adminCandidate) {
+          const candidateData = adminCandidate.data();
+          await userRef.set({
+            ...candidateData,
+            email: normalizedEmail,
+            migratedFrom: adminCandidate.id,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+
+          if (adminCandidate.id !== user.uid) {
+            await db.collection('users').doc(adminCandidate.id).delete();
+          }
+
+          userDoc = await userRef.get();
+          userData = userDoc.data() || {};
+          console.log('Permisos reconciliados desde', adminCandidate.id, 'hacia', user.uid);
+        }
+      } catch (reconcileErr) {
+        const code = reconcileErr && reconcileErr.code ? String(reconcileErr.code) : '';
+        if (code !== 'permission-denied') throw reconcileErr;
+      }
+    }
+
+    if (!hasAdminPermissions(userData)) {
       showLoginMessage('Tu cuenta no tiene permisos de administrador. Contacta al administrador para obtener acceso.', 'error');
       await auth.signOut();
       return;
