@@ -289,6 +289,7 @@ loginBtn.addEventListener('click', async () => {
         code === 'auth/operation-not-supported-in-this-environment';
 
       if (shouldFallbackToRedirect) {
+        showLoginMessage('El navegador bloqueó la ventana emergente. Redirigiendo para continuar el acceso...', 'info');
         await auth.signInWithRedirect(provider);
         return;
       }
@@ -323,6 +324,27 @@ function showLoginMessage(msg, type = 'info') {
   loginMsg.className = 'message ' + type;
   loginMsg.style.display = 'block';
 }
+
+window.addEventListener('error', (event) => {
+  const message = event && event.message ? String(event.message) : 'Error inesperado en la aplicación.';
+  showLoginMessage('Error de aplicación: ' + message, 'error');
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event && event.reason ? String(event.reason?.message || event.reason) : 'Error asíncrono no controlado.';
+  showLoginMessage('Error asíncrono: ' + reason, 'error');
+});
+
+auth.getRedirectResult()
+  .then((result) => {
+    if (result && result.user) {
+      showLoginMessage('Autenticación por redirección completada. Verificando permisos...', 'info');
+    }
+  })
+  .catch((e) => {
+    console.error('Error en getRedirectResult:', e);
+    showLoginMessage('Error al completar acceso por redirección: ' + e.message, 'error');
+  });
 
 // ==================== TABS ====================
 
