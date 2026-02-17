@@ -13,6 +13,10 @@
     appId: "1:202492003192:web:0212f791eb0a4740cd3e8d"
   };
   window.__FIREBASE_CONFIG__ = firebaseConfig;
+  // Opcional: correos que pueden autoasignarse admin solo en su primer ingreso.
+  // Ejemplo:
+  // window.__BOOTSTRAP_ADMIN_EMAILS__ = ['tu-correo@cetis50cdmx.com'];
+  window.__BOOTSTRAP_ADMIN_EMAILS__ = window.__BOOTSTRAP_ADMIN_EMAILS__ || [];
 
   if (typeof firebase === 'undefined') {
     console.error('Firebase SDK no cargado. Asegúrate de incluir firebase-app-compat.js antes de este archivo.');

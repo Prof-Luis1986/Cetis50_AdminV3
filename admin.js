@@ -10,6 +10,9 @@ const db = firebase.firestore();
 const DOMINIOS_PERMITIDOS = ['cetis50cdmx.com', 'cetis50cdmx.edu.mx'];
 const DOMINIOS_PERMITIDOS_LABEL = DOMINIOS_PERMITIDOS.map((d) => '@' + d).join(' o ');
 const ANNOUNCEMENT_PUBLIC_CATEGORIES = ['general', 'eventos', 'vinculacion'];
+const BOOTSTRAP_ADMIN_EMAILS = Array.isArray(window.__BOOTSTRAP_ADMIN_EMAILS__)
+  ? window.__BOOTSTRAP_ADMIN_EMAILS.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)
+  : [];
 
 let currentUser = null;
 let csvData = null;
@@ -114,24 +117,6 @@ function userCanManageUsers() {
   return userCanPublishGeneral();
 }
 
-async function hasAnyAdminUser() {
-  const canPublishSnapshot = await db
-    .collection('users')
-    .where('canPublish', '==', true)
-    .limit(1)
-    .get();
-
-  if (!canPublishSnapshot.empty) return true;
-
-  const canPublishDocentesSnapshot = await db
-    .collection('users')
-    .where('canPublishDocentes', '==', true)
-    .limit(1)
-    .get();
-
-  return !canPublishDocentesSnapshot.empty;
-}
-
 auth.onAuthStateChanged(async (user) => {
   if (!user) {
     loginSection.classList.remove('hidden');
@@ -153,12 +138,54 @@ auth.onAuthStateChanged(async (user) => {
     let userDoc = await userRef.get();
 
     if (!userDoc.exists) {
+      // Intentar buscar por email en cualquier doc (si fue creado con ID aleatorio/manual).
+      const normalizedEmail = (user.email || '').toLowerCase();
+      let emailDoc = null;
+      try {
+        const byEmailSnap = await db
+          .collection('users')
+          .where('email', '==', normalizedEmail)
+          .limit(1)
+          .get();
+        if (!byEmailSnap.empty) {
+          emailDoc = byEmailSnap.docs[0];
+        }
+      } catch (emailLookupErr) {
+        const code = emailLookupErr && emailLookupErr.code ? String(emailLookupErr.code) : '';
+        if (code !== 'permission-denied') throw emailLookupErr;
+      }
+
+      if (emailDoc) {
+        const data = emailDoc.data();
+        await userRef.set({
+          ...data,
+          email: normalizedEmail,
+          migratedFrom: emailDoc.id,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        if (emailDoc.id !== user.uid) {
+          await db.collection('users').doc(emailDoc.id).delete();
+        }
+
+        userDoc = await userRef.get();
+        console.log('Usuario migrado por email de', emailDoc.id, 'a', user.uid);
+      }
+    }
+
+    if (!userDoc.exists) {
       // Intentar buscar por email (doc creado antes de que existiera el UID)
       const tempId = user.email.replace(/[@.]/g, '_');
       const tempRef = db.collection('users').doc(tempId);
-      const tempDoc = await tempRef.get();
+      let tempDoc = null;
+      try {
+        tempDoc = await tempRef.get();
+      } catch (tempErr) {
+        const code = tempErr && tempErr.code ? String(tempErr.code) : '';
+        if (code !== 'permission-denied') throw tempErr;
+      }
 
-      if (tempDoc.exists) {
+      if (tempDoc && tempDoc.exists) {
         // Migrar ese documento al UID real
         const data = tempDoc.data();
         await userRef.set({
@@ -171,13 +198,8 @@ auth.onAuthStateChanged(async (user) => {
         userDoc = await userRef.get();
         console.log('Usuario migrado de', tempId, 'a', user.uid);
       } else {
-        // Primer arranque: si no existe ningún admin, este usuario institucional se vuelve admin inicial.
-        let bootstrapAdmin = false;
-        try {
-          bootstrapAdmin = !(await hasAnyAdminUser());
-        } catch (bootstrapError) {
-          console.warn('No se pudo verificar admins existentes para bootstrap:', bootstrapError);
-        }
+        // Bootstrap controlado por lista explícita de correos permitidos.
+        const bootstrapAdmin = BOOTSTRAP_ADMIN_EMAILS.includes((user.email || '').toLowerCase());
 
         await userRef.set({
           email: user.email,
@@ -191,7 +213,7 @@ auth.onAuthStateChanged(async (user) => {
         });
 
         if (!bootstrapAdmin) {
-          showLoginMessage('Tu cuenta ha sido creada pero no tienes permisos de administrador. Contacta al administrador para obtener acceso.', 'error');
+          showLoginMessage('Tu cuenta ha sido creada pero no tienes permisos de administrador. Un admin debe habilitar canPublish o canPublishDocentes en users/' + user.uid, 'error');
           await auth.signOut();
           return;
         }
