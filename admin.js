@@ -114,6 +114,24 @@ function userCanManageUsers() {
   return userCanPublishGeneral();
 }
 
+async function hasAnyAdminUser() {
+  const canPublishSnapshot = await db
+    .collection('users')
+    .where('canPublish', '==', true)
+    .limit(1)
+    .get();
+
+  if (!canPublishSnapshot.empty) return true;
+
+  const canPublishDocentesSnapshot = await db
+    .collection('users')
+    .where('canPublishDocentes', '==', true)
+    .limit(1)
+    .get();
+
+  return !canPublishDocentesSnapshot.empty;
+}
+
 auth.onAuthStateChanged(async (user) => {
   if (!user) {
     loginSection.classList.remove('hidden');
@@ -153,19 +171,33 @@ auth.onAuthStateChanged(async (user) => {
         userDoc = await userRef.get();
         console.log('Usuario migrado de', tempId, 'a', user.uid);
       } else {
-        // Crear usuario básico sin permisos
+        // Primer arranque: si no existe ningún admin, este usuario institucional se vuelve admin inicial.
+        let bootstrapAdmin = false;
+        try {
+          bootstrapAdmin = !(await hasAnyAdminUser());
+        } catch (bootstrapError) {
+          console.warn('No se pudo verificar admins existentes para bootstrap:', bootstrapError);
+        }
+
         await userRef.set({
           email: user.email,
           nombre: user.displayName || user.email,
           esDocente: false,
           turno: null,
-          canPublish: false,
-          canPublishDocentes: false,
+          canPublish: bootstrapAdmin,
+          canPublishDocentes: bootstrapAdmin,
+          bootstrapAdmin,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        showLoginMessage('Tu cuenta ha sido creada pero no tienes permisos de administrador. Contacta al administrador para obtener acceso.', 'error');
-        await auth.signOut();
-        return;
+
+        if (!bootstrapAdmin) {
+          showLoginMessage('Tu cuenta ha sido creada pero no tienes permisos de administrador. Contacta al administrador para obtener acceso.', 'error');
+          await auth.signOut();
+          return;
+        }
+
+        showLoginMessage('Se creó tu cuenta como administrador inicial del sistema.', 'success');
+        userDoc = await userRef.get();
       }
     }
 
@@ -242,7 +274,14 @@ loginBtn.addEventListener('click', async () => {
     }
   } catch (e) {
     console.error(e);
-    showLoginMessage('Error al iniciar sesión: ' + e.message, 'error');
+    const code = e && e.code ? String(e.code) : '';
+    if (code === 'auth/unauthorized-domain') {
+      showLoginMessage('Este dominio no está autorizado en Firebase Authentication. Agrega este dominio en la consola de Firebase > Authentication > Settings > Authorized domains.', 'error');
+    } else if (code === 'auth/operation-not-allowed') {
+      showLoginMessage('El proveedor Google no está habilitado en Firebase Authentication.', 'error');
+    } else {
+      showLoginMessage('Error al iniciar sesión: ' + e.message, 'error');
+    }
   } finally {
     loginBtn.disabled = false;
     loginBtn.textContent = originalLabel;
