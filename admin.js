@@ -11,7 +11,7 @@ const DOMINIOS_PERMITIDOS = ['cetis50cdmx.com', 'cetis50cdmx.edu.mx'];
 const DOMINIOS_PERMITIDOS_LABEL = DOMINIOS_PERMITIDOS.map((d) => '@' + d).join(' o ');
 const ANNOUNCEMENT_PUBLIC_CATEGORIES = ['general', 'eventos', 'vinculacion'];
 const BOOTSTRAP_ADMIN_EMAILS = Array.isArray(window.__BOOTSTRAP_ADMIN_EMAILS__)
-  ? window.__BOOTSTRAP_ADMIN_EMAILS.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)
+  ? window.__BOOTSTRAP_ADMIN_EMAILS__.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)
   : [];
 
 let currentUser = null;
@@ -136,8 +136,11 @@ auth.onAuthStateChanged(async (user) => {
     loginSection.classList.remove('hidden');
     adminPanel.classList.add('hidden');
     currentUser = null;
+    showLoginMessage('Sin sesión activa. Inicia sesión con tu cuenta institucional.', 'info');
     return;
   }
+
+  showLoginMessage('Sesión detectada (' + (user.email || 'sin correo') + '). Verificando permisos...', 'info');
 
   if (!isAllowedDomain(user.email || '')) {
     showLoginMessage('Solo se permite acceso con correo ' + DOMINIOS_PERMITIDOS_LABEL, 'error');
@@ -303,6 +306,7 @@ auth.onAuthStateChanged(async (user) => {
     
     userName.textContent = userData.nombre || user.displayName;
     userEmail.textContent = user.email;
+    showLoginMessage('Acceso concedido para ' + user.email, 'success');
     loginSection.classList.add('hidden');
     adminPanel.classList.remove('hidden');
 
