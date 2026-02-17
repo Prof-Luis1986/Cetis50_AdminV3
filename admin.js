@@ -239,6 +239,21 @@ auth.onAuthStateChanged(async (user) => {
 
     let userData = userDoc.data() || {};
     if (!hasAdminPermissions(userData)) {
+      const emailLower = (user.email || '').toLowerCase();
+      if (BOOTSTRAP_ADMIN_EMAILS.includes(emailLower)) {
+        await userRef.set({
+          email: emailLower,
+          canPublish: true,
+          canPublishDocentes: true,
+          bootstrapAdmin: true,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        userDoc = await userRef.get();
+        userData = userDoc.data() || {};
+      }
+    }
+
+    if (!hasAdminPermissions(userData)) {
       // Si el doc por UID no tiene permisos, buscar otro doc del mismo email que sí los tenga y reconciliar.
       const normalizedEmail = (user.email || '').toLowerCase();
       try {
