@@ -10,6 +10,8 @@ const db = firebase.firestore();
 const DOMINIOS_PERMITIDOS = ['cetis50cdmx.com', 'cetis50cdmx.edu.mx'];
 const DOMINIOS_PERMITIDOS_LABEL = DOMINIOS_PERMITIDOS.map((d) => '@' + d).join(' o ');
 const ANNOUNCEMENT_PUBLIC_CATEGORIES = ['general', 'eventos', 'vinculacion'];
+const ANNOUNCEMENT_MANAGED_CATEGORIES = ['general', 'eventos', 'vinculacion', 'alumnos'];
+const ANNOUNCEMENT_ADMIN_LIST_LIMIT = 200;
 const BOOTSTRAP_ADMIN_EMAILS = Array.isArray(window.__BOOTSTRAP_ADMIN_EMAILS__)
   ? window.__BOOTSTRAP_ADMIN_EMAILS__.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)
   : [];
@@ -20,6 +22,7 @@ let boletasData = null;
 let horariosData = null;
 let asistenciaData = null;
 let asistenciaInvalid = 0;
+let avisosGeneralesDocs = [];
 
 // ==================== ELEMENTOS DOM ====================
 
@@ -40,6 +43,7 @@ const tabContents = document.querySelectorAll('.tab-content');
 const formAvisoGeneral = document.getElementById('form-aviso-general');
 const msgAvisoGeneral = document.getElementById('msg-aviso-general');
 const listaAvisosGenerales = document.getElementById('lista-avisos-generales');
+const buscarAvisosGenerales = document.getElementById('buscar-avisos-generales');
 
 // Avisos Docentes
 const formAvisoDocente = document.getElementById('form-aviso-docente');
@@ -125,6 +129,57 @@ function asBoolean(value) {
   }
   if (typeof value === 'number') return value === 1;
   return false;
+}
+
+function timestampToMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function formatFirestoreDate(value) {
+  if (!value) return '';
+  if (typeof value.toDate === 'function') {
+    return value.toDate().toLocaleDateString('es-MX');
+  }
+  if (value instanceof Date) {
+    return value.toLocaleDateString('es-MX');
+  }
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? '' : new Date(parsed).toLocaleDateString('es-MX');
+}
+
+async function collectQueryDocs(queryPromises) {
+  const results = await Promise.allSettled(queryPromises);
+  const docsByKey = new Map();
+  let permissionDenied = false;
+  let successfulQueries = 0;
+
+  results.forEach((result) => {
+    if (result.status === 'fulfilled' && result.value) {
+      successfulQueries += 1;
+      result.value.docs.forEach((doc) => {
+        docsByKey.set(`${doc.ref.parent.path}/${doc.id}`, doc);
+      });
+      return;
+    }
+
+    const code = result.reason && result.reason.code ? String(result.reason.code) : '';
+    if (code === 'permission-denied') {
+      permissionDenied = true;
+      return;
+    }
+    if (result.reason) console.error(result.reason);
+  });
+
+  return {
+    docs: Array.from(docsByKey.values()),
+    permissionDenied,
+    successfulQueries
+  };
 }
 
 function hasAdminPermissions(userData = {}) {
@@ -801,83 +856,124 @@ formAvisoGeneral.addEventListener('submit', async (e) => {
   }
 });
 
+if (buscarAvisosGenerales) {
+  buscarAvisosGenerales.addEventListener('input', () => {
+    renderAvisosGenerales(avisosGeneralesDocs);
+  });
+}
+
+function avisoMatchesSearch(aviso = {}, search = '') {
+  if (!search) return true;
+  const text = [
+    aviso.title,
+    aviso.titulo,
+    aviso.content,
+    aviso.contenido,
+    aviso.category,
+    aviso.categoria,
+    aviso.linkUrl,
+    Array.isArray(aviso.specialties) ? aviso.specialties.join(' ') : ''
+  ].join(' ').toLowerCase();
+
+  return text.includes(search);
+}
+
+function renderAvisosGenerales(docs) {
+  const search = (buscarAvisosGenerales?.value || '').trim().toLowerCase();
+  const visibleDocs = docs.filter((doc) => avisoMatchesSearch(doc.data() || {}, search));
+
+  if (!visibleDocs.length) {
+    listaAvisosGenerales.innerHTML = search
+      ? '<p style="color:#777;">No se encontraron avisos con esa búsqueda.</p>'
+      : '<p style="color:#777;">No hay avisos publicados.</p>';
+    return;
+  }
+
+  let html = '';
+  visibleDocs.forEach(doc => {
+    const aviso = doc.data();
+    const fecha = formatFirestoreDate(aviso.createdAt || aviso.fecha || aviso.date);
+
+    const specialties = aviso.specialties?.join(', ') || 'Todas';
+    const categoria   = aviso.category || aviso.categoria || 'general';
+    const expira      = formatFirestoreDate(aviso.expiryDate || aviso.expiracion) || 'Sin expiración';
+
+    html += `
+      <div class="card-item">
+        <h3>${aviso.title || aviso.titulo || '(Sin título)'}</h3>
+        <p>${aviso.content || aviso.contenido || ''}</p>
+        ${aviso.linkUrl ? `
+          <p>
+            <strong>Enlace:</strong>
+            <a href="${aviso.linkUrl}" target="_blank" rel="noopener" style="color:#7a1e29;">
+              ${aviso.linkUrl}
+            </a>
+          </p>
+        ` : ''}
+        <p class="meta">
+          <strong>Categoría:</strong> ${categoria}<br>
+          <strong>Especialidades:</strong> ${specialties}<br>
+          <strong>Expira:</strong> ${expira}<br>
+          <strong>Publicado:</strong> ${fecha || 'Sin fecha'}
+        </p>
+        <div class="actions">
+          <button class="btn btn-danger btn-sm" onclick="eliminarAvisoGeneral('${doc.id}')">🗑️ Eliminar</button>
+        </div>
+      </div>
+    `;
+  });
+
+  listaAvisosGenerales.innerHTML = html;
+}
+
 async function cargarAvisosGenerales() {
   try {
-    const queryPublic = db.collection('announcements')
-      .where('category', 'in', ANNOUNCEMENT_PUBLIC_CATEGORIES)
-      .orderBy('createdAt', 'desc')
-      .limit(20)
-      .get();
+    const queryPromises = [
+      db.collection('announcements')
+        .where('category', 'in', ANNOUNCEMENT_PUBLIC_CATEGORIES)
+        .orderBy('createdAt', 'desc')
+        .limit(ANNOUNCEMENT_ADMIN_LIST_LIMIT)
+        .get(),
+      db.collection('announcements')
+        .where('category', '==', 'alumnos')
+        .orderBy('createdAt', 'desc')
+        .limit(ANNOUNCEMENT_ADMIN_LIST_LIMIT)
+        .get(),
+      db.collection('announcements')
+        .where('category', 'in', ANNOUNCEMENT_MANAGED_CATEGORIES)
+        .limit(ANNOUNCEMENT_ADMIN_LIST_LIMIT)
+        .get(),
+      db.collection('announcements')
+        .where('categoria', 'in', ANNOUNCEMENT_MANAGED_CATEGORIES)
+        .limit(ANNOUNCEMENT_ADMIN_LIST_LIMIT)
+        .get()
+    ];
 
-    const canReadAlumnos = hasInstitutionalSession();
-    const queryAlumnos = canReadAlumnos
-      ? db.collection('announcements')
-          .where('category', '==', 'alumnos')
-          .orderBy('createdAt', 'desc')
-          .limit(20)
-          .get()
-      : Promise.resolve(null);
+    const { docs, permissionDenied, successfulQueries } = await collectQueryDocs(queryPromises);
 
-    const [publicSnap, alumnosSnap] = await Promise.all([queryPublic, queryAlumnos]);
-    const docsById = new Map();
-
-    (publicSnap?.docs || []).forEach((doc) => docsById.set(doc.id, doc));
-    (alumnosSnap?.docs || []).forEach((doc) => docsById.set(doc.id, doc));
-
-    const orderedDocs = Array.from(docsById.values())
-      .sort((a, b) => {
-        const aCreatedAt = a.data().createdAt;
-        const bCreatedAt = b.data().createdAt;
-        const ta = aCreatedAt && typeof aCreatedAt.toMillis === 'function' ? aCreatedAt.toMillis() : 0;
-        const tb = bCreatedAt && typeof bCreatedAt.toMillis === 'function' ? bCreatedAt.toMillis() : 0;
-        return tb - ta;
+    const orderedDocs = docs
+      .filter((doc) => {
+        const aviso = doc.data() || {};
+        const categoria = aviso.category || aviso.categoria || 'general';
+        return ANNOUNCEMENT_MANAGED_CATEGORIES.includes(categoria);
       })
-      .slice(0, 20);
+      .sort((a, b) => {
+        const aData = a.data() || {};
+        const bData = b.data() || {};
+        return timestampToMillis(bData.createdAt || bData.fecha || bData.date) - timestampToMillis(aData.createdAt || aData.fecha || aData.date);
+      })
+      .slice(0, ANNOUNCEMENT_ADMIN_LIST_LIMIT);
 
     if (!orderedDocs.length) {
-      listaAvisosGenerales.innerHTML = '<p style="color:#777;">No hay avisos publicados.</p>';
+      listaAvisosGenerales.innerHTML = permissionDenied
+        && successfulQueries === 0
+        ? '<p style="color:#c62828;">No se pudieron consultar algunos avisos por permisos de Firestore.</p>'
+        : '<p style="color:#777;">No hay avisos publicados.</p>';
       return;
     }
 
-    let html = '';
-    orderedDocs.forEach(doc => {
-      const aviso = doc.data();
-      const fecha = aviso.createdAt?.toDate 
-        ? aviso.createdAt.toDate().toLocaleDateString('es-MX')
-        : '';
-
-      const specialties = aviso.specialties?.join(', ') || 'Todas';
-      const categoria   = aviso.category || 'general';
-      const expira      = aviso.expiryDate?.toDate
-        ? aviso.expiryDate.toDate().toLocaleDateString('es-MX')
-        : (aviso.expiracion || 'Sin expiración');
-
-      html += `
-        <div class="card-item">
-          <h3>${aviso.title || aviso.titulo || '(Sin título)'}</h3>
-          <p>${aviso.content || aviso.contenido || ''}</p>
-          ${aviso.linkUrl ? `
-            <p>
-              <strong>Enlace:</strong>
-              <a href="${aviso.linkUrl}" target="_blank" rel="noopener" style="color:#7a1e29;">
-                ${aviso.linkUrl}
-              </a>
-            </p>
-          ` : ''}
-          <p class="meta">
-            <strong>Categoría:</strong> ${categoria}<br>
-            <strong>Especialidades:</strong> ${specialties}<br>
-            <strong>Expira:</strong> ${expira}<br>
-            <strong>Publicado:</strong> ${fecha}
-          </p>
-          <div class="actions">
-            <button class="btn btn-danger btn-sm" onclick="eliminarAvisoGeneral('${doc.id}')">🗑️ Eliminar</button>
-          </div>
-        </div>
-      `;
-    });
-
-    listaAvisosGenerales.innerHTML = html;
+    avisosGeneralesDocs = orderedDocs;
+    renderAvisosGenerales(avisosGeneralesDocs);
   } catch (e) {
     console.error(e);
     if (e && e.code === 'permission-denied') {
@@ -986,29 +1082,52 @@ async function cargarAvisosDocentes() {
   }
 
   try {
-    const snapshot = await db.collection('docentesAnnouncements')
-      .orderBy('createdAt', 'desc')
-      .limit(20)
-      .get();
+    const { docs, permissionDenied, successfulQueries } = await collectQueryDocs([
+      db.collection('docentesAnnouncements')
+        .orderBy('createdAt', 'desc')
+        .limit(50)
+        .get(),
+      db.collection('docentesAnnouncements')
+        .limit(50)
+        .get(),
+      db.collection('announcements')
+        .where('category', '==', 'docentes')
+        .limit(50)
+        .get(),
+      db.collection('announcements')
+        .where('categoria', '==', 'docentes')
+        .limit(50)
+        .get()
+    ]);
 
-    if (snapshot.empty) {
-      listaAvisosDocentes.innerHTML = '<p style="color:#777;">No hay avisos para docentes.</p>';
+    const orderedDocs = docs
+      .sort((a, b) => {
+        const aData = a.data() || {};
+        const bData = b.data() || {};
+        return timestampToMillis(bData.createdAt || bData.fecha || bData.date) - timestampToMillis(aData.createdAt || aData.fecha || aData.date);
+      })
+      .slice(0, 20);
+
+    if (!orderedDocs.length) {
+      listaAvisosDocentes.innerHTML = permissionDenied
+        && successfulQueries === 0
+        ? '<p style="color:#c62828;">No se pudieron consultar algunos avisos por permisos de Firestore.</p>'
+        : '<p style="color:#777;">No hay avisos para docentes.</p>';
       return;
     }
 
     let html = '';
-    snapshot.forEach(doc => {
+    orderedDocs.forEach(doc => {
       const aviso = doc.data();
-      const fecha = aviso.createdAt?.toDate 
-        ? aviso.createdAt.toDate().toLocaleDateString('es-MX')
-        : '';
+      const fecha = formatFirestoreDate(aviso.createdAt || aviso.fecha || aviso.date);
       const turnoLabel = aviso.turno === 'ambos' ? '🔄 Ambos' :
                         aviso.turno === 'matutino' ? '🌅 Matutino' : '🌙 Vespertino';
+      const collectionName = doc.ref.parent.id;
 
       html += `
         <div class="card-item">
-          <h3>${aviso.titulo}</h3>
-          <p>${aviso.contenido}</p>
+          <h3>${aviso.titulo || aviso.title || '(Sin título)'}</h3>
+          <p>${aviso.contenido || aviso.content || ''}</p>
           ${aviso.linkUrl ? `
             <p>
               <strong>Enlace:</strong>
@@ -1022,7 +1141,7 @@ async function cargarAvisosDocentes() {
             <strong>Publicado:</strong> ${fecha}
           </p>
           <div class="actions">
-            <button class="btn btn-danger btn-sm" onclick="eliminarAvisoDocente('${doc.id}')">🗑️ Eliminar</button>
+            <button class="btn btn-danger btn-sm" onclick="eliminarAvisoDocente('${doc.id}', '${collectionName}')">🗑️ Eliminar</button>
           </div>
         </div>
       `;
@@ -1035,10 +1154,13 @@ async function cargarAvisosDocentes() {
   }
 }
 
-async function eliminarAvisoDocente(id) {
+async function eliminarAvisoDocente(id, collectionName = 'docentesAnnouncements') {
   if (!confirm('¿Eliminar este aviso?')) return;
   try {
-    await db.collection('docentesAnnouncements').doc(id).delete();
+    if (!['docentesAnnouncements', 'announcements'].includes(collectionName)) {
+      throw new Error('Colección no permitida.');
+    }
+    await db.collection(collectionName).doc(id).delete();
     showMessage(msgAvisoDocente, '✅ Aviso eliminado.', 'success');
     cargarAvisosDocentes();
   } catch (e) {
