@@ -16,7 +16,8 @@
   // Correos con bootstrap admin (útil cuando el doc users/{uid} aún no tiene permisos).
   // Puedes agregar más correos institucionales aquí.
   window.__BOOTSTRAP_ADMIN_EMAILS__ = window.__BOOTSTRAP_ADMIN_EMAILS__ || [
-    'luisalfonsomartinez@cetis50cdmx.com'
+    'luisalfonsomartinez@cetis50cdmx.com',
+    'lmartinez@cetis50cdmx.edu.mx'
   ];
 
   if (typeof firebase === 'undefined') {

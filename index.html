@@ -572,6 +572,7 @@
         <button class="tab-btn" data-tab="avisos-tutorias">🧑‍🎓 Avisos Tutorías</button>
         <button class="tab-btn" data-tab="usuarios">👥 Gestión Usuarios</button>
         <button class="tab-btn" data-tab="boletas">📊 Importar Boletas</button>
+        <button class="tab-btn" data-tab="bitacora-boletas">🛡️ Bitácora Boletas</button>
       </nav>
 
       <!-- Tab 1: Avisos Generales -->
@@ -901,7 +902,8 @@
             </div>
 
             <div class="btn-group">
-              <button type="submit" class="btn btn-primary">Registrar Usuario</button>
+              <button id="user-form-submit-btn" type="submit" class="btn btn-primary">Registrar Usuario</button>
+              <button id="cancel-user-edit-btn" type="button" class="btn btn-secondary" style="display:none;">Cancelar edición</button>
               <button type="reset" class="btn btn-secondary">Limpiar</button>
             </div>
           </form>
@@ -963,10 +965,20 @@
         <div class="btn-group">
           <button id="boletas-preview-btn" class="btn btn-secondary" disabled>👁️ Previsualizar</button>
           <button id="boletas-upload-btn" class="btn btn-primary" disabled>⬆️ Importar Boletas</button>
+          <button id="boletas-delete-btn" class="btn btn-danger">🗑️ Eliminar boletas viejas</button>
         </div>
 
         <div id="msg-boletas"></div>
         <div id="boletas-preview-table"></div>
+      </div>
+
+      <div id="tab-bitacora-boletas" class="tab-content">
+        <h2 style="color: var(--vino-700); margin-top:0;">Bitácora de acceso a boletas</h2>
+        <p style="color:#666;">Muestra los inicios de sesión y las consultas más recientes. Se conservan usuario, fecha, resultado y número de control consultado.</p>
+        <div class="btn-group">
+          <button id="refresh-boleta-access-btn" class="btn btn-secondary">🔄 Actualizar bitácora</button>
+        </div>
+        <div id="boleta-access-list" style="margin-top:20px;"><p style="color:#777;">Abre esta pestaña para cargar la bitácora.</p></div>
       </div>
 
     </div>
@@ -979,8 +991,8 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="firebase-config.js?v=20260529-01"></script>
-<script src="admin.js?v=20260529-01"></script>
+<script src="firebase-config.js?v=20261126-02"></script>
+<script src="admin.js?v=20261126-02"></script>
 
 </body>
 </html>

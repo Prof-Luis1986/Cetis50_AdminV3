@@ -15,6 +15,10 @@ const ANNOUNCEMENT_ADMIN_LIST_LIMIT = 200;
 const BOOTSTRAP_ADMIN_EMAILS = Array.isArray(window.__BOOTSTRAP_ADMIN_EMAILS__)
   ? window.__BOOTSTRAP_ADMIN_EMAILS__.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)
   : [];
+const USER_MANAGER_EMAILS = new Set([
+  'lmartinez@cetis50cdmx.edu.mx',
+  'luisalfonsomartinez@cetis50cdmx.com'
+]);
 
 let currentUser = null;
 let csvData = null;
@@ -23,6 +27,7 @@ let horariosData = null;
 let asistenciaData = null;
 let asistenciaInvalid = 0;
 let avisosGeneralesDocs = [];
+let editingUserId = null;
 
 // ==================== ELEMENTOS DOM ====================
 
@@ -73,14 +78,19 @@ const msgCsv = document.getElementById('msg-csv');
 const csvPreviewTable = document.getElementById('csv-preview-table');
 const refreshUsuariosBtn = document.getElementById('refresh-usuarios-btn');
 const listaUsuarios = document.getElementById('lista-usuarios');
+const cancelUserEditBtn = document.getElementById('cancel-user-edit-btn');
+const userFormSubmitBtn = document.getElementById('user-form-submit-btn');
 
 // Boletas
 const boletasFileInput = document.getElementById('boletas-file-input');
 const boletasFileName = document.getElementById('boletas-file-name');
 const boletasPreviewBtn = document.getElementById('boletas-preview-btn');
 const boletasUploadBtn = document.getElementById('boletas-upload-btn');
+const boletasDeleteBtn = document.getElementById('boletas-delete-btn');
 const msgBoletas = document.getElementById('msg-boletas');
 const boletasPreviewTable = document.getElementById('boletas-preview-table');
+const refreshBoletaAccessBtn = document.getElementById('refresh-boleta-access-btn');
+const boletaAccessList = document.getElementById('boleta-access-list');
 
 // Horarios Docentes
 const horariosFileInput = document.getElementById('horarios-file-input');
@@ -118,7 +128,7 @@ function userCanPublishDocentes() {
 }
 
 function userCanManageUsers() {
-  return userCanPublishGeneral();
+  return USER_MANAGER_EMAILS.has(String(currentUser?.email || '').toLowerCase());
 }
 
 function asBoolean(value) {
@@ -484,8 +494,62 @@ tabBtns.forEach(btn => {
         content.classList.remove('active');
       }
     });
+
+    if (targetTab === 'bitacora-boletas') cargarBitacoraBoletas();
   });
 });
+
+function escapeAccessText(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+}
+
+function formatAccessDate(value) {
+  if (!value || typeof value.toDate !== 'function') return 'Pendiente';
+  return value.toDate().toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+async function cargarBitacoraBoletas() {
+  if (!boletaAccessList) return;
+  boletaAccessList.innerHTML = '<p style="color:#777;">Cargando bitácora…</p>';
+  try {
+    const snapshot = await db.collection('boletaAccessLogs')
+      .orderBy('createdAt', 'desc')
+      .limit(200)
+      .get();
+
+    if (snapshot.empty) {
+      boletaAccessList.innerHTML = '<p style="color:#777;">Aún no hay accesos registrados.</p>';
+      return;
+    }
+
+    const rows = snapshot.docs.map((doc) => {
+      const item = doc.data() || {};
+      const eventLabel = item.evento === 'sesion_iniciada' ? 'Inicio de sesión' : 'Consulta de boleta';
+      return `<tr>
+        <td>${escapeAccessText(formatAccessDate(item.createdAt))}</td>
+        <td>${escapeAccessText(item.email || '—')}</td>
+        <td>${escapeAccessText(eventLabel)}</td>
+        <td>${escapeAccessText(item.numeroControl || '—')}</td>
+        <td>${escapeAccessText(item.resultado || '—')}</td>
+      </tr>`;
+    }).join('');
+
+    boletaAccessList.innerHTML = `<div style="overflow-x:auto;"><table class="data-table">
+      <thead><tr><th>Fecha</th><th>Cuenta</th><th>Acción</th><th>No. control</th><th>Resultado</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+  } catch (error) {
+    console.error('Error cargando bitácora de boletas:', error);
+    const message = error && error.code === 'permission-denied'
+      ? 'Esta cuenta no está registrada como administradora del panel.'
+      : 'No se pudo cargar la bitácora.';
+    boletaAccessList.innerHTML = `<p style="color:#c62828;">${message}</p>`;
+  }
+}
+
+refreshBoletaAccessBtn?.addEventListener('click', cargarBitacoraBoletas);
 
 // ==================== MODAL ====================
 
@@ -1496,6 +1560,21 @@ formUsuarioIndividual.addEventListener('submit', async (e) => {
   }
 
   try {
+    if (editingUserId) {
+      await db.collection('users').doc(editingUserId).update({
+        nombre,
+        turno,
+        esDocente,
+        canPublish,
+        canPublishDocentes,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      showMessage(msgUsuarioIndividual, '✅ Privilegios y datos actualizados.', 'success');
+      cancelarEdicionUsuario();
+      cargarUsuarios();
+      return;
+    }
+
     // Buscar si ya existe un usuario con ese email
     const querySnapshot = await db.collection('users')
       .where('email', '==', email)
@@ -1697,7 +1776,8 @@ async function cargarUsuarios() {
           <td>${u.esDocente ? '<span class="badge success">Sí</span>' : '<span class="badge warning">No</span>'}</td>
           <td>${u.turno || '-'}</td>
           <td>${permisos.join(', ') || '-'}</td>
-          <td>
+          <td style="white-space:nowrap;">
+            <button class="btn btn-secondary btn-sm" onclick="editarUsuario('${doc.id}')">✏️ Editar</button>
             <button class="btn btn-danger btn-sm" onclick="eliminarUsuario('${doc.id}')">🗑️</button>
           </td>
         </tr>
@@ -1715,6 +1795,39 @@ async function cargarUsuarios() {
     listaUsuarios.innerHTML = '<p style="color:#c62828;">Error al cargar usuarios.</p>';
   }
 }
+
+async function editarUsuario(id) {
+  if (!userCanManageUsers()) return;
+  try {
+    const snapshot = await db.collection('users').doc(id).get();
+    if (!snapshot.exists) throw new Error('El usuario ya no existe.');
+    const user = snapshot.data() || {};
+    editingUserId = id;
+    document.getElementById('ui-email').value = user.email || '';
+    document.getElementById('ui-email').disabled = true;
+    document.getElementById('ui-nombre').value = user.nombre || '';
+    document.getElementById('ui-turno').value = user.turno || '';
+    document.getElementById('ui-esDocente').checked = asBoolean(user.esDocente);
+    document.getElementById('ui-canPublish').checked = asBoolean(user.canPublish);
+    document.getElementById('ui-canPublishDocentes').checked = asBoolean(user.canPublishDocentes);
+    userFormSubmitBtn.textContent = 'Guardar cambios';
+    cancelUserEditBtn.style.display = '';
+    formUsuarioIndividual.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (error) {
+    console.error(error);
+    showMessage(msgUsuarioIndividual, '❌ No se pudo abrir el usuario: ' + error.message, 'error');
+  }
+}
+
+function cancelarEdicionUsuario() {
+  editingUserId = null;
+  formUsuarioIndividual.reset();
+  document.getElementById('ui-email').disabled = false;
+  userFormSubmitBtn.textContent = 'Registrar Usuario';
+  cancelUserEditBtn.style.display = 'none';
+}
+
+cancelUserEditBtn?.addEventListener('click', cancelarEdicionUsuario);
 
 async function eliminarUsuario(id) {
   if (!confirm('¿Eliminar este usuario?')) return;
@@ -1751,10 +1864,17 @@ boletasPreviewBtn.addEventListener('click', () => {
   Papa.parse(file, {
     header: true,
     skipEmptyLines: true,
+    transformHeader: (header) => normalizarClaveCSV(header),
     complete: (results) => {
-      boletasData = results.data;
+      const filas = results.data || [];
+      const resultado = prepararBoletasDesdeFilas(filas);
+      boletasData = resultado.boletas;
       mostrarPreviewBoletas(boletasData.slice(0, 5));
-      showMessage(msgBoletas, `✅ ${boletasData.length} boletas encontradas. Mostrando primeras 5.`, 'info');
+      showMessage(
+        msgBoletas,
+        `✅ ${boletasData.length} boletas listas (${resultado.totalMaterias} materias). ${resultado.invalidas} filas inválidas.`,
+        resultado.invalidas > 0 ? 'info' : 'success'
+      );
     },
     error: (error) => {
       showMessage(msgBoletas, '❌ Error al leer CSV: ' + error.message, 'error');
@@ -1768,34 +1888,81 @@ boletasUploadBtn.addEventListener('click', async () => {
     return;
   }
 
-  if (!confirm(`¿Importar ${boletasData.length} boletas a Firestore?`)) return;
+  const totalMaterias = boletasData.reduce((total, boleta) => total + (boleta.materias?.length || 0), 0);
+  if (!confirm(`¿Importar ${boletasData.length} boletas (${totalMaterias} materias) a Firestore?`)) return;
 
   showMessage(msgBoletas, '⏳ Importando boletas...', 'info');
 
   let exitosos = 0;
   let errores = 0;
+  let batch = db.batch();
+  let batchCount = 0;
 
-  for (const row of boletasData) {
-    try {
-      await db.collection('boletas').add({
-        ...row,
+  try {
+    for (const boleta of boletasData) {
+      const ref = db.collection('boletas').doc(boleta.numero_control);
+      batch.set(ref, {
+        ...boleta,
+        numeroControl: boleta.numero_control,
         importedAt: firebase.firestore.FieldValue.serverTimestamp(),
         importedBy: currentUser.uid
       });
       exitosos++;
-    } catch (e) {
-      console.error('Error en fila:', row, e);
-      errores++;
+      batchCount++;
+
+      if (batchCount >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        batchCount = 0;
+      }
     }
+
+    if (batchCount > 0) {
+      await batch.commit();
+    }
+  } catch (e) {
+    console.error('Error importando boletas:', e);
+    errores++;
   }
 
-  showMessage(msgBoletas, `✅ Importación completa: ${exitosos} exitosas, ${errores} errores.`, 'success');
+  showMessage(msgBoletas, `✅ Importación completa: ${exitosos} boletas guardadas, ${errores} errores.`, errores > 0 ? 'info' : 'success');
   boletasFileInput.value = '';
   boletasFileName.textContent = '';
   boletasPreviewBtn.disabled = true;
   boletasUploadBtn.disabled = true;
   boletasPreviewTable.innerHTML = '';
 });
+
+if (boletasDeleteBtn) {
+  boletasDeleteBtn.addEventListener('click', async () => {
+    const primeraConfirmacion = confirm(
+      '¿Eliminar TODAS las boletas de la colección "boletas"? Esta acción no se puede deshacer.'
+    );
+    if (!primeraConfirmacion) return;
+
+    const texto = prompt('Para confirmar escribe ELIMINAR BOLETAS');
+    if (texto !== 'ELIMINAR BOLETAS') {
+      showMessage(msgBoletas, 'Eliminación cancelada.', 'info');
+      return;
+    }
+
+    try {
+      boletasDeleteBtn.disabled = true;
+      boletasUploadBtn.disabled = true;
+      boletasPreviewBtn.disabled = true;
+      showMessage(msgBoletas, '⏳ Eliminando boletas viejas...', 'info');
+      const eliminadas = await eliminarColeccionPorLotes('boletas');
+      showMessage(msgBoletas, `✅ Eliminación completa: ${eliminadas} boletas eliminadas.`, 'success');
+    } catch (e) {
+      console.error('Error eliminando boletas:', e);
+      showMessage(msgBoletas, '❌ Error eliminando boletas: ' + e.message, 'error');
+    } finally {
+      boletasDeleteBtn.disabled = false;
+      boletasPreviewBtn.disabled = !boletasFileInput.files[0];
+      boletasUploadBtn.disabled = !boletasData || boletasData.length === 0;
+    }
+  });
+}
 
 function mostrarPreviewBoletas(data) {
   if (data.length === 0) {
@@ -1804,7 +1971,7 @@ function mostrarPreviewBoletas(data) {
   }
 
   let html = '<table class="data-table"><thead><tr>';
-  const keys = Object.keys(data[0]);
+  const keys = ['numero_control', 'nombre_completo', 'carrera', 'grupo', 'turno', 'semestre', 'materias'];
   keys.forEach(key => {
     html += `<th>${key}</th>`;
   });
@@ -1813,13 +1980,112 @@ function mostrarPreviewBoletas(data) {
   data.forEach(row => {
     html += '<tr>';
     keys.forEach(key => {
-      html += `<td>${row[key] || ''}</td>`;
+      const value = key === 'materias' ? `${row.materias?.length || 0} materias` : (row[key] || '');
+      html += `<td>${value}</td>`;
     });
     html += '</tr>';
   });
 
   html += '</tbody></table>';
   boletasPreviewTable.innerHTML = html;
+}
+
+function normalizarNumeroControlBoleta(valor) {
+  const raw = String(valor || '').trim();
+  if (!raw) return '';
+  const sinEspacios = raw.replace(/\s+/g, '');
+  if (/^\d{14}$/.test(sinEspacios)) return sinEspacios;
+  if (/^\d+\.0+$/.test(sinEspacios)) return sinEspacios.replace(/\.0+$/, '');
+  return sinEspacios;
+}
+
+function normalizarFilaBoleta(row) {
+  const mapped = mapearFilaCSV(row);
+  const numeroControl = normalizarNumeroControlBoleta(obtenerValorCSV(mapped, [
+    'numero_control',
+    'no_control',
+    'num_control',
+    'numcontrol',
+    'numerocontrol',
+    'numero_de_control'
+  ]));
+
+  if (!/^\d{14}$/.test(numeroControl)) {
+    return { ok: false, error: 'numero_control', numeroControl };
+  }
+
+  const nombre = String(obtenerValorCSV(mapped, ['nombre'])).trim();
+  const paterno = String(obtenerValorCSV(mapped, ['paterno', 'apellido_paterno'])).trim();
+  const materno = String(obtenerValorCSV(mapped, ['materno', 'apellido_materno'])).trim();
+  const nombreCompleto = String(obtenerValorCSV(mapped, ['nombre_completo', 'alumno'])).trim()
+    || [nombre, paterno, materno].filter(Boolean).join(' ');
+
+  const boleta = {
+    ciclo_escolar: String(obtenerValorCSV(mapped, ['ciclo_escolar'])).trim(),
+    periodo: String(obtenerValorCSV(mapped, ['periodo'])).trim(),
+    plantel: String(obtenerValorCSV(mapped, ['plantel'])).trim(),
+    carrera: String(obtenerValorCSV(mapped, ['carrera'])).trim(),
+    generacion: String(obtenerValorCSV(mapped, ['generacion'])).trim(),
+    turno: String(obtenerValorCSV(mapped, ['turno'])).trim(),
+    semestre: String(obtenerValorCSV(mapped, ['semestre'])).trim(),
+    grupo: String(obtenerValorCSV(mapped, ['grupo'])).trim(),
+    numero_control: numeroControl,
+    curp: String(obtenerValorCSV(mapped, ['curp'])).trim(),
+    nombre,
+    paterno,
+    materno,
+    nombre_completo: nombreCompleto
+  };
+
+  const materia = {
+    clave: String(obtenerValorCSV(mapped, ['clave', 'clave_asignatura', 'clave_materia', 'clv_centro'])).trim(),
+    nombre: String(obtenerValorCSV(mapped, ['asignatura', 'nombre_asignatura', 'materia', 'modulo'])).trim(),
+    docente_nombre: String(obtenerValorCSV(mapped, ['docente_nombre', 'docente'])).trim(),
+    docente_rfc: String(obtenerValorCSV(mapped, ['docente_rfc', 'rfc_docente'])).trim(),
+    p1: String(obtenerValorCSV(mapped, ['periodo_1', '1er_p', 'primer_periodo'])).trim(),
+    p2: String(obtenerValorCSV(mapped, ['periodo_2', '2do_p', 'segundo_periodo'])).trim(),
+    p3: String(obtenerValorCSV(mapped, ['periodo_3', '3er_p', 'tercer_periodo'])).trim(),
+    calificacion_final: String(obtenerValorCSV(mapped, ['calificacion_final', 'final'])).trim(),
+    a1: String(obtenerValorCSV(mapped, ['asistencia_periodo_1', '1er_a', 'asistencia_1'])).trim(),
+    a2: String(obtenerValorCSV(mapped, ['asistencia_periodo_2', '2do_a', 'asistencia_2'])).trim(),
+    a3: String(obtenerValorCSV(mapped, ['asistencia_periodo_3', '3er_a', 'asistencia_3'])).trim(),
+    tipo_acreditacion: String(obtenerValorCSV(mapped, ['tipo_acreditacion'])).trim(),
+    firmado: String(obtenerValorCSV(mapped, ['firmado'])).trim()
+  };
+
+  if (!materia.nombre) {
+    return { ok: false, error: 'asignatura', numeroControl };
+  }
+
+  return { ok: true, boleta, materia };
+}
+
+function prepararBoletasDesdeFilas(rows) {
+  const porControl = new Map();
+  let invalidas = 0;
+  let totalMaterias = 0;
+
+  rows.forEach((row) => {
+    const normalizada = normalizarFilaBoleta(row);
+    if (!normalizada.ok) {
+      invalidas++;
+      return;
+    }
+
+    const control = normalizada.boleta.numero_control;
+    if (!porControl.has(control)) {
+      porControl.set(control, { ...normalizada.boleta, materias: [] });
+    }
+
+    porControl.get(control).materias.push(normalizada.materia);
+    totalMaterias++;
+  });
+
+  return {
+    boletas: Array.from(porControl.values()),
+    invalidas,
+    totalMaterias
+  };
 }
 
 // ==================== HORARIOS DOCENTES ====================
@@ -2023,11 +2289,15 @@ async function buscarHorarioPorRfc() {
 }
 
 async function eliminarHorariosDocentes() {
+  return eliminarColeccionPorLotes('horarios_docentes');
+}
+
+async function eliminarColeccionPorLotes(collectionName) {
   const batchSize = 400;
   let totalEliminados = 0;
 
   while (true) {
-    const snapshot = await db.collection('horarios_docentes')
+    const snapshot = await db.collection(collectionName)
       .orderBy(firebase.firestore.FieldPath.documentId())
       .limit(batchSize)
       .get();
